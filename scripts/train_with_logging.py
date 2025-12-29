@@ -376,7 +376,7 @@ def train_multi_map(
                 'reward_efficiency': info.get('reward_components', {}).get('efficiency', 0),
                 'has_event': info.get('has_event', False),
                 'nav_time': info.get('nav_time', 1.0),
-                'battery_level': getattr(env_wrapper.current_state.robot if hasattr(env_wrapper, 'current_state') else env_wrapper.env.current_state.robot, 'battery_level', 1.0),
+                'battery_level': getattr(env_wrapper.current_env.current_state.robot if hasattr(env_wrapper, 'current_env') else env_wrapper.current_state.robot, 'battery_level', 1.0),
                 'valid_action_count': np.sum(action_mask > 0.5) if action_mask is not None else 0,
                 'patrol_valid': action_mask[:len(action_mask)//2].max() > 0.5 if action_mask is not None else True,
                 'dispatch_valid': action_mask[len(action_mask)//2:].max() > 0.5 if action_mask is not None else True,
