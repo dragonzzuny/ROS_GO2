@@ -1,9 +1,25 @@
+# Reviewer: 박용준
 # Corridor Map - 긴 복도형 맵 (120m x 30m)
 # 목적: 1차원적인 긴 경로에서의 순찰 최적화
 
 env:
   map_width: 120.0
   map_height: 30.0
+
+  # Occupancy grid resolution (meters per cell)
+  grid_resolution: 0.5
+
+  # Walls and obstacles (list of polygons, each polygon is list of [x, y] vertices)
+  # 벽/장애물: 각 폴리곤은 [x, y] 좌표 리스트
+  walls:
+    # Side room 1 (측면 방 1)
+    - [[30.0, 5.0], [38.0, 5.0], [38.0, 12.0], [30.0, 12.0]]
+    # Side room 2 (측면 방 2)
+    - [[55.0, 18.0], [63.0, 18.0], [63.0, 25.0], [55.0, 25.0]]
+    # Side room 3 (측면 방 3)
+    - [[80.0, 5.0], [88.0, 5.0], [88.0, 12.0], [80.0, 12.0]]
+    # Narrow obstacle in corridor (복도 장애물 - 기둥 등)
+    - [[100.0, 13.0], [102.0, 13.0], [102.0, 17.0], [100.0, 17.0]]
 
   # 10개 포인트 - 긴 복도를 따라 배치
   patrol_points:

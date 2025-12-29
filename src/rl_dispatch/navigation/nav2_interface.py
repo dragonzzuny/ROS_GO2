@@ -1,14 +1,26 @@
+# Reviewer: 박용준
 """
 Navigation interface abstraction for patrol robots.
 
 Provides unified interface for both simulated navigation (training) and
 real Nav2 integration (deployment).
+
+Changes by Reviewer 박용준:
+- Integrated A* pathfinding for realistic navigation
+- Added occupancy grid support
+- Realistic ETA based on actual path length (not Euclidean distance)
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Tuple, Optional, List
 import numpy as np
+
+# Import A* pathfinder
+try:
+    from rl_dispatch.navigation.pathfinding import AStarPathfinder
+except ImportError:
+    AStarPathfinder = None  # Fallback for backwards compatibility
 
 
 @dataclass
@@ -100,19 +112,16 @@ class NavigationInterface(ABC):
 
 class SimulatedNav2(NavigationInterface):
     """
-    Simplified navigation simulation for RL training.
+    Realistic navigation simulation for RL training with A* pathfinding.
 
-    This provides a fast, simplified simulation of Nav2 behavior without
-    requiring actual ROS2/Nav2 infrastructure. Used during training.
-
-    The simulation includes:
-    - Straight-line distance estimation
-    - Time calculation based on robot velocity
-    - Random variation to simulate planning overhead
-    - Occasional navigation failures (5%)
-    - Rare collisions (1%)
+    Changes by Reviewer 박용준:
+    - Uses A* pathfinding on occupancy grid (no wall penetration)
+    - Realistic ETA based on actual path length
+    - Dynamic obstacle support via grid updates
 
     Args:
+        occupancy_grid: 2D occupancy grid (0=free, 1=occupied)
+        grid_resolution: Meters per grid cell
         max_velocity: Maximum robot velocity (m/s)
         nav_failure_rate: Probability of navigation failure (0-1)
         collision_rate: Probability of collision (0-1)
@@ -121,6 +130,8 @@ class SimulatedNav2(NavigationInterface):
 
     def __init__(
         self,
+        occupancy_grid: Optional[np.ndarray] = None,
+        grid_resolution: float = 0.5,
         max_velocity: float = 1.5,
         nav_failure_rate: float = 0.05,
         collision_rate: float = 0.01,
@@ -131,48 +142,87 @@ class SimulatedNav2(NavigationInterface):
         self.collision_rate = collision_rate
         self.np_random = np_random if np_random is not None else np.random.RandomState()
 
+        # Reviewer 박용준: A* pathfinder integration
+        if occupancy_grid is not None and AStarPathfinder is not None:
+            self.pathfinder = AStarPathfinder(occupancy_grid, grid_resolution)
+            self.use_astar = True
+        else:
+            self.pathfinder = None
+            self.use_astar = False
+
     def navigate_to_goal(
         self,
         start: Tuple[float, float],
         goal: Tuple[float, float],
     ) -> NavigationResult:
         """
-        Simulate navigation to goal.
+        Simulate navigation to goal with A* pathfinding.
+
+        Reviewer 박용준: Uses A* if available, falls back to straight-line
 
         Returns:
             NavigationResult with simulated time, success, collision
         """
-        # Calculate straight-line distance
-        distance = np.sqrt(
-            (goal[0] - start[0]) ** 2 + (goal[1] - start[1]) ** 2
-        )
+        if self.use_astar and self.pathfinder is not None:
+            # A* pathfinding (realistic)
+            path_result = self.pathfinder.find_path(start, goal)
 
-        # Estimate time based on average velocity
-        avg_velocity = self.max_velocity * 0.7  # Conservative estimate
-        base_time = distance / avg_velocity if avg_velocity > 0 else 0.0
+            if path_result is None:
+                # No path exists
+                return NavigationResult(
+                    time=0.0,
+                    success=False,
+                    collision=False,
+                    path=None
+                )
 
-        # Add random variation (Nav2 planning overhead, obstacles)
-        time_variation = self.np_random.normal(1.0, 0.1)  # ±10% variation
-        nav_time = max(0.1, base_time * time_variation)
+            path, distance = path_result
 
-        # Simulate navigation failure
-        nav_success = self.np_random.random() > self.nav_failure_rate
+            # Time calculation based on actual path length
+            avg_velocity = self.max_velocity * 0.7
+            base_time = distance / avg_velocity if avg_velocity > 0 else 0.0
 
-        # Simulate collision
-        collision = self.np_random.random() < self.collision_rate
+            # Add random variation
+            time_variation = self.np_random.normal(1.0, 0.1)
+            nav_time = max(0.1, base_time * time_variation)
 
-        if collision:
-            nav_success = False
+            # Simulate navigation failure and collision
+            nav_success = self.np_random.random() > self.nav_failure_rate
+            collision = self.np_random.random() < self.collision_rate if nav_success else False
 
-        # Simple straight-line path
-        path = [start, goal] if nav_success else None
+            return NavigationResult(
+                time=nav_time,
+                success=nav_success and not collision,
+                collision=collision,
+                path=path if nav_success else None
+            )
 
-        return NavigationResult(
-            time=nav_time,
-            success=nav_success,
-            collision=collision,
-            path=path,
-        )
+        else:
+            # Fallback: straight-line (original behavior)
+            distance = np.sqrt(
+                (goal[0] - start[0]) ** 2 + (goal[1] - start[1]) ** 2
+            )
+
+            avg_velocity = self.max_velocity * 0.7
+            base_time = distance / avg_velocity if avg_velocity > 0 else 0.0
+
+            time_variation = self.np_random.normal(1.0, 0.1)
+            nav_time = max(0.1, base_time * time_variation)
+
+            nav_success = self.np_random.random() > self.nav_failure_rate
+            collision = self.np_random.random() < self.collision_rate
+
+            if collision:
+                nav_success = False
+
+            path = [start, goal] if nav_success else None
+
+            return NavigationResult(
+                time=nav_time,
+                success=nav_success,
+                collision=collision,
+                path=path,
+            )
 
     def get_eta(
         self,
@@ -180,16 +230,30 @@ class SimulatedNav2(NavigationInterface):
         goal: Tuple[float, float],
     ) -> float:
         """
-        Get estimated time of arrival (straight-line distance / velocity).
+        Get estimated time of arrival using A* path length.
+
+        Reviewer 박용준: Uses A* distance instead of Euclidean
 
         Returns:
-            Estimated time in seconds
+            Estimated time in seconds (or np.inf if no path)
         """
-        distance = np.sqrt(
-            (goal[0] - start[0]) ** 2 + (goal[1] - start[1]) ** 2
-        )
-        avg_velocity = self.max_velocity * 0.7
-        return distance / avg_velocity if avg_velocity > 0 else 0.0
+        if self.use_astar and self.pathfinder is not None:
+            # A* distance (realistic)
+            distance = self.pathfinder.get_distance(start, goal)
+
+            if distance == np.inf:
+                return np.inf  # No path exists
+
+            avg_velocity = self.max_velocity * 0.7
+            return distance / avg_velocity if avg_velocity > 0 else 0.0
+
+        else:
+            # Fallback: straight-line
+            distance = np.sqrt(
+                (goal[0] - start[0]) ** 2 + (goal[1] - start[1]) ** 2
+            )
+            avg_velocity = self.max_velocity * 0.7
+            return distance / avg_velocity if avg_velocity > 0 else 0.0
 
     def plan_path(
         self,
@@ -197,11 +261,32 @@ class SimulatedNav2(NavigationInterface):
         goal: Tuple[float, float],
     ) -> Optional[List[Tuple[float, float]]]:
         """
-        Plan simple straight-line path.
+        Plan path using A*.
+
+        Reviewer 박용준: Uses A* if available
 
         Returns:
-            List of waypoints [start, goal]
+            List of waypoints or None if no path
         """
+        if self.use_astar and self.pathfinder is not None:
+            # A* pathfinding
+            result = self.pathfinder.find_path(start, goal)
+            return result[0] if result else None
+        else:
+            # Fallback: straight-line
+            return [start, goal]
+
+    def update_occupancy_grid(self, new_grid: np.ndarray):
+        """
+        Update occupancy grid (for dynamic obstacles).
+
+        Reviewer 박용준: Allows updating grid with dynamic obstacles
+
+        Args:
+            new_grid: Updated occupancy grid with dynamic obstacles
+        """
+        if self.use_astar and self.pathfinder is not None:
+            self.pathfinder.grid = new_grid
         # Simulate occasional planning failure
         if self.np_random.random() < self.nav_failure_rate:
             return None

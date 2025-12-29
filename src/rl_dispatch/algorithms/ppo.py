@@ -120,6 +120,7 @@ class PPOAgent:
         self,
         obs: np.ndarray,
         deterministic: bool = False,
+        action_mask: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, float, float]:
         """
         Select action for given observation.
@@ -127,6 +128,8 @@ class PPOAgent:
         Args:
             obs: Observation array, shape (obs_dim,)
             deterministic: If True, select argmax action (for evaluation)
+            action_mask: Optional action mask, shape (2*K,) flattened.
+                        First K elements are patrol masks, next K are dispatch masks.
 
         Returns:
             action: Action array, shape (2,) - [mode, replan]
@@ -136,16 +139,40 @@ class PPOAgent:
         with torch.no_grad():
             obs_t = torch.from_numpy(obs).float().unsqueeze(0).to(self.device)
 
+            # Reviewer 박용준: Convert action_mask to mode_mask
+            mode_mask = None
+            if action_mask is not None:
+                # action_mask: (2*K,) -> extract mode availability
+                num_candidates = action_mask.shape[0] // 2
+                patrol_valid = action_mask[:num_candidates].max() > 0.5
+                dispatch_valid = action_mask[num_candidates:].max() > 0.5
+                mode_mask = torch.tensor(
+                    [[patrol_valid, dispatch_valid]],
+                    dtype=torch.bool,
+                    device=self.device
+                )
+
             if deterministic:
                 # Deterministic policy (argmax)
                 mode_logits, replan_logits, value = self.network(obs_t)
+
+                # Apply masking before argmax
+                if mode_mask is not None:
+                    mode_logits = torch.where(
+                        mode_mask,
+                        mode_logits,
+                        torch.tensor(-1e8, device=mode_logits.device),
+                    )
+
                 mode_action = mode_logits.argmax(dim=-1)
                 replan_action = replan_logits.argmax(dim=-1)
                 action = torch.stack([mode_action, replan_action], dim=1)
                 log_prob = torch.tensor(0.0)  # Not used in eval
             else:
-                # Stochastic policy (sample)
-                action, log_prob, _, value = self.network.get_action_and_value(obs_t)
+                # Stochastic policy (sample) with masking
+                action, log_prob, _, value = self.network.get_action_and_value(
+                    obs_t, mode_mask=mode_mask
+                )
 
             return (
                 action.cpu().numpy()[0],
@@ -198,11 +225,19 @@ class PPOAgent:
         for epoch in range(self.training_config.num_epochs):
             # Iterate through minibatches
             for batch in self.buffer.get(batch_size=self.training_config.batch_size):
-                obs, actions, old_log_probs, advantages, returns, old_values = batch
+                # Reviewer 박용준: Unpack 7 values (added action_masks)
+                obs, actions, old_log_probs, advantages, returns, old_values, action_masks = batch
 
-                # Forward pass through network
+                # Reviewer 박용준: Convert action_masks to mode_masks
+                # action_masks: (batch, 2*K) -> mode_mask: (batch, 2)
+                num_candidates = action_masks.shape[1] // 2
+                patrol_valid = action_masks[:, :num_candidates].max(dim=1)[0] > 0.5
+                dispatch_valid = action_masks[:, num_candidates:].max(dim=1)[0] > 0.5
+                mode_mask = torch.stack([patrol_valid, dispatch_valid], dim=1)
+
+                # Forward pass through network with action masking
                 _, new_log_probs, entropy, values = self.network.get_action_and_value(
-                    obs, action=actions
+                    obs, action=actions, mode_mask=mode_mask
                 )
 
                 # Policy loss (PPO clipped objective)

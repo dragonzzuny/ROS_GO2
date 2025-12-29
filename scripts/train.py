@@ -255,8 +255,10 @@ def train(args: argparse.Namespace) -> None:
         next_obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
 
-        # Store in buffer
-        agent.buffer.add(obs, action, log_prob, reward, value, done)
+        # Store in buffer (Reviewer 박용준: Pass nav_time and action_mask)
+        nav_time = info.get("nav_time", 1.0)  # Default to 1.0 if not present
+        action_mask = info.get("action_mask", None)  # Action mask for next state
+        agent.buffer.add(obs, action, log_prob, reward, value, done, nav_time, action_mask)
 
         # Update for next step
         episode_return += reward

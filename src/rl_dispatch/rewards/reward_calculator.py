@@ -78,6 +78,7 @@ class RewardCalculator:
         nav_failure: bool,
         event_resolved: bool,
         patrol_point_visited: Optional[int] = None,
+        proximity_resolution: bool = False,  # Reviewer 박용준: For low-risk event partial credit
     ) -> RewardComponents:
         """
         Calculate complete reward for a state transition.
@@ -93,15 +94,17 @@ class RewardCalculator:
             nav_failure: Whether Nav2 planning failed
             event_resolved: Whether event was successfully resolved
             patrol_point_visited: Index of patrol point visited (None if none)
+            proximity_resolution: Whether low-risk event resolved via proximity (Reviewer 박용준)
 
         Returns:
             RewardComponents with all components and total
         """
-        # Calculate each component
+        # Calculate each component (Reviewer 박용준: Pass proximity_resolution)
         r_event = self._calculate_event_reward(
             event=event,
             current_time=current_time,
             event_resolved=event_resolved,
+            proximity_resolution=proximity_resolution,
         )
 
         r_patrol = self._calculate_patrol_reward(
@@ -137,12 +140,14 @@ class RewardCalculator:
         event: Optional[Event],
         current_time: float,
         event_resolved: bool,
+        proximity_resolution: bool = False,  # Reviewer 박용준
     ) -> float:
         """
         Calculate event response reward (R^evt).
 
         Reward structure:
-        - Large bonus for successfully resolving event
+        - Large bonus for successfully resolving event (full credit for direct dispatch)
+        - 50% bonus for low-risk event resolved via proximity (Reviewer 박용준)
         - Continuous penalty for delay (encourages quick response)
         - Large penalty if event exceeds max delay (failure)
 
@@ -150,6 +155,7 @@ class RewardCalculator:
             event: Active event (None if no event)
             current_time: Current time
             event_resolved: Whether event was resolved this step
+            proximity_resolution: Whether resolved via proximity (partial credit) (Reviewer 박용준)
 
         Returns:
             Event reward component
@@ -159,11 +165,17 @@ class RewardCalculator:
             return 0.0
 
         if event_resolved:
-            # Successfully resolved event - large bonus
+            # Successfully resolved event
             # Bonus decreases slightly with delay to encourage speed
             delay = current_time - event.detection_time
             delay_factor = max(0.0, 1.0 - delay / self.config.event_max_delay)
-            return self.config.event_response_bonus * (0.5 + 0.5 * delay_factor)
+            base_bonus = self.config.event_response_bonus * (0.5 + 0.5 * delay_factor)
+
+            # Reviewer 박용준: Apply 50% multiplier for proximity resolution
+            if proximity_resolution:
+                return base_bonus * 0.5  # Partial credit for low-risk event
+            else:
+                return base_bonus  # Full credit for direct dispatch
 
         # Event exists but not resolved - apply delay penalty
         delay = current_time - event.detection_time

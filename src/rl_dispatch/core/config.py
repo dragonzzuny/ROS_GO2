@@ -1,3 +1,4 @@
+# Reviewer: 박용준
 """
 Configuration management for the RL Dispatch system.
 
@@ -150,6 +151,17 @@ class EnvConfig:
     ])
     patrol_point_priorities: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0, 1.0])
     charging_station_position: Tuple[float, float] = (5.0, 5.0)  # Default: near corner
+
+    # Occupancy grid and obstacles (Reviewer: 박용준 - Added for realistic navigation)
+    grid_resolution: float = 0.5  # meters per grid cell
+    walls: List[List[Tuple[float, float]]] = field(default_factory=list)  # List of wall polygons
+
+    # Dynamic obstacles (Reviewer: 박용준 - Added for congestion handling)
+    num_pedestrians: int = 0  # Number of dynamic pedestrians
+    num_vehicles: int = 0  # Number of dynamic vehicles (forklifts, etc.)
+    pedestrian_speed: float = 1.0  # m/s
+    vehicle_speed: float = 0.8  # m/s
+    dynamic_obstacle_radius: float = 0.5  # Safety radius in meters
 
     # Episode configuration
     max_episode_steps: int = 200

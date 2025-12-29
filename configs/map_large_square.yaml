@@ -1,9 +1,23 @@
+# Reviewer: 박용준
 # Large Square Map - 큰 정사각형 맵 (100m x 100m)
 # 목적: 넓은 공간에서의 순찰 및 이벤트 대응 학습
 
 env:
   map_width: 100.0
   map_height: 100.0
+
+  # Occupancy grid resolution (meters per cell)
+  grid_resolution: 0.5
+
+  # Walls and obstacles (list of polygons, each polygon is list of [x, y] vertices)
+  # 벽/장애물: 각 폴리곤은 [x, y] 좌표 리스트
+  walls:
+    # Central obstacle (장애물 1)
+    - [[40.0, 40.0], [60.0, 40.0], [60.0, 60.0], [40.0, 60.0]]
+    # L-shaped corridor wall (L자형 복도 벽)
+    - [[20.0, 20.0], [25.0, 20.0], [25.0, 75.0], [20.0, 75.0]]
+    # Vertical divider (수직 구분 벽)
+    - [[75.0, 25.0], [80.0, 25.0], [80.0, 75.0], [75.0, 75.0]]
 
   # 12개 포인트 - 외곽 + 내부 순찰
   patrol_points:

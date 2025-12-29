@@ -1,3 +1,4 @@
+# Reviewer: 박용준
 # L-Shaped Building Map - L자형 건물 (80m x 80m)
 # 목적: 비정형 공간에서의 순찰 최적화
 # 면적: 약 4,800㎡ (약 1,450평)
@@ -5,6 +6,21 @@
 env:
   map_width: 80.0
   map_height: 80.0
+
+  # Occupancy grid resolution (meters per cell)
+  grid_resolution: 0.5
+
+  # Walls and obstacles (list of polygons, each polygon is list of [x, y] vertices)
+  # 벽/장애물: L자 형태의 막힌 영역과 내부 장애물
+  walls:
+    # L-shape blocked area (L자 내부 막힌 영역 - 우상단)
+    - [[42.0, 42.0], [80.0, 42.0], [80.0, 80.0], [42.0, 80.0]]
+    # Internal divider 1 (내부 구분 벽 1)
+    - [[25.0, 20.0], [28.0, 20.0], [28.0, 35.0], [25.0, 35.0]]
+    # Internal divider 2 (내부 구분 벽 2)
+    - [[50.0, 15.0], [53.0, 15.0], [53.0, 30.0], [50.0, 30.0]]
+    # Room in corner (코너 방)
+    - [[15.0, 25.0], [22.0, 25.0], [22.0, 35.0], [15.0, 35.0]]
 
   # 10개 포인트 - L자 형태를 따라 배치
   patrol_points:
