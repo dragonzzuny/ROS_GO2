@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # Training service
+  train:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./src:/workspace/src
+      - ./scripts:/workspace/scripts
+      - ./configs:/workspace/configs
+      - ./checkpoints:/workspace/checkpoints
+      - ./runs:/workspace/runs
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    command: python scripts/train.py --cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Evaluation service
+  eval:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./src:/workspace/src
+      - ./scripts:/workspace/scripts
+      - ./checkpoints:/workspace/checkpoints
+    command: python scripts/evaluate.py --model checkpoints/model.pth --episodes 100
+
+  # TensorBoard service
+  tensorboard:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./runs:/workspace/runs
+    ports:
+      - "6006:6006"
+    command: tensorboard --logdir /workspace/runs --host 0.0.0.0
+
+  # Jupyter notebook service for analysis
+  jupyter:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./:/workspace
+    ports:
+      - "8888:8888"
+    command: jupyter notebook --ip=0.0.0.0 --allow-root --no-browser

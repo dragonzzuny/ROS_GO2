@@ -1,0 +1,122 @@
+# Default configuration for RL Dispatch training
+# This file combines all configurations in one place for convenience
+
+# Environment Configuration
+env:
+  # Map parameters
+  map_width: 50.0
+  map_height: 50.0
+
+  # Patrol points (x, y) coordinates
+  patrol_points:
+    - [10.0, 10.0]
+    - [40.0, 10.0]
+    - [40.0, 40.0]
+    - [10.0, 40.0]
+
+  # Patrol point priorities (higher = more important)
+  patrol_point_priorities: [1.0, 1.0, 1.0, 1.0]
+
+  # Episode limits
+  max_episode_steps: 200
+  max_episode_time: 600.0  # seconds
+  timestep: 0.1
+
+  # Event generation (Poisson process)
+  event_generation_rate: 5.0  # average events per episode
+  event_min_urgency: 0.3
+  event_max_urgency: 1.0
+  event_min_confidence: 0.7
+
+  # Robot dynamics
+  robot_max_velocity: 1.5  # m/s
+  robot_max_angular_velocity: 1.0  # rad/s
+  robot_battery_capacity: 100.0  # Wh
+  robot_battery_drain_rate: 20.0  # W
+
+  # LiDAR
+  lidar_num_channels: 64
+  lidar_max_range: 10.0
+  lidar_min_range: 0.1
+
+  # Candidates
+  num_candidates: 6
+  candidate_strategies:
+    - keep_order
+    - nearest_first
+    - most_overdue_first
+    - overdue_eta_balance
+    - risk_weighted
+    - balanced_coverage
+
+# Reward Configuration
+reward:
+  # Component weights
+  w_event: 1.0
+  w_patrol: 0.5
+  w_safety: 2.0
+  w_efficiency: 0.1
+
+  # Event response
+  event_response_bonus: 50.0
+  event_delay_penalty_rate: 0.5
+  event_max_delay: 120.0
+
+  # Patrol coverage
+  patrol_gap_penalty_rate: 0.1
+  patrol_visit_bonus: 2.0
+
+  # Safety
+  collision_penalty: -100.0
+  nav_failure_penalty: -20.0
+
+  # Efficiency
+  distance_penalty_rate: 0.01
+
+# Network Configuration
+network:
+  encoder_hidden_dims: [256, 256]
+  activation: relu
+  use_layer_norm: false
+  orthogonal_init: true
+  init_scale: 1.4142135623730951  # sqrt(2)
+
+# Training Configuration
+training:
+  # PPO hyperparameters
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_epsilon: 0.2
+  value_loss_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+
+  # Training schedule
+  total_timesteps: 10000000
+  num_steps: 2048
+  num_epochs: 10
+  batch_size: 256
+  num_minibatches: 8
+
+  # Learning rate schedule
+  anneal_lr: true
+  lr_schedule: linear
+
+  # Normalization
+  normalize_obs: true
+  normalize_rewards: true
+  clip_obs: 10.0
+  clip_rewards: 10.0
+
+  # Logging
+  log_interval: 10
+  save_interval: 100
+  eval_interval: 50
+  eval_episodes: 10
+
+  # Experiment
+  experiment_name: ppo_patrol
+  seed: 42
+  cuda: true
+  num_envs: 1
