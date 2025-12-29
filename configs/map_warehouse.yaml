@@ -1,0 +1,88 @@
+# Warehouse Map - 창고/물류센터 (140m x 100m)
+# 목적: 넓고 개방된 공간, 규칙적이지만 긴 이동 거리
+# 면적: 14,000㎡ (약 4,235평)
+
+env:
+  map_width: 140.0
+  map_height: 100.0
+
+  # 12개 포인트 - 창고 구역, 하역장, 통로 등
+  patrol_points:
+    # 하역장 구역 (아래쪽)
+    - [15.0, 15.0]   # P0: 하역장 A
+    - [45.0, 15.0]   # P1: 하역장 B
+    - [75.0, 15.0]   # P2: 하역장 C
+    - [105.0, 15.0]  # P3: 하역장 D
+    - [125.0, 15.0]  # P4: 하역장 E
+
+    # 중앙 통로 (중간)
+    - [125.0, 40.0]  # P5: 동쪽 통로
+    - [90.0, 50.0]   # P6: 중앙 교차로
+    - [50.0, 40.0]   # P7: 서쪽 통로
+    - [15.0, 50.0]   # P8: 서쪽 끝
+
+    # 저장 구역 (위쪽)
+    - [30.0, 75.0]   # P9: 저장 A
+    - [70.0, 85.0]   # P10: 저장 B (중앙)
+    - [110.0, 75.0]  # P11: 저장 C
+
+  patrol_point_priorities:
+    - 1.5  # 하역장들 - 중요
+    - 1.5
+    - 1.5
+    - 1.5
+    - 1.5
+    - 1.2  # 통로
+    - 1.8  # 중앙 교차로 (매우 중요)
+    - 1.2
+    - 1.0
+    - 1.1  # 저장 구역
+    - 1.3  # 중앙 저장 구역 (중요)
+    - 1.1
+
+  # Charging station - 하역장 입구 근처
+  charging_station_position: [10.0, 10.0]
+
+  max_episode_steps: 350
+  max_episode_time: 1200.0  # 20분
+
+  event_generation_rate: 15.0  # 작업이 많아서 이벤트 많음
+  event_min_urgency: 0.3
+  event_max_urgency: 1.0
+  event_min_confidence: 0.6
+
+  robot_max_velocity: 2.2  # 창고라서 빠르게
+  robot_max_angular_velocity: 1.1
+  robot_battery_capacity: 250.0
+  robot_battery_drain_rate: 28.0
+
+  num_candidates: 10
+  candidate_strategies:
+    - "keep_order"
+    - "nearest_first"
+    - "most_overdue_first"
+    - "overdue_eta_balance"
+    - "risk_weighted"
+    - "balanced_coverage"
+    - "overdue_threshold_first"
+    - "windowed_replan"
+    - "minimal_deviation_insert"
+    - "shortest_eta_first"
+
+reward:
+  w_event: 1.1  # 작업 이벤트 중요
+  w_patrol: 0.6
+  w_safety: 1.8  # 차량/장비 있어서 안전 중요
+  w_efficiency: 0.18  # 효율성 중요
+
+  event_response_bonus: 62.0
+  event_delay_penalty_rate: 0.6
+  event_max_delay: 160.0
+
+  patrol_gap_penalty_rate: 0.14
+  patrol_visit_bonus: 3.0
+
+  collision_penalty: -120.0  # 장비 충돌 위험
+  nav_failure_penalty: -22.0
+
+  distance_penalty_rate: 0.006

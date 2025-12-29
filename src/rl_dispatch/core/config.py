@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Tuple, Optional
 import yaml
 from pathlib import Path
+import numpy as np
 
 
 @dataclass
@@ -81,7 +82,16 @@ class RewardConfig:
     def load_yaml(cls, path: str) -> 'RewardConfig':
         """Load configuration from YAML file."""
         with open(path, 'r') as f:
-            config_dict = yaml.safe_load(f)
+            data = yaml.safe_load(f)
+
+        # Handle both formats:
+        # 1. Top-level keys are RewardConfig params: {w_event: 1.0, ...}
+        # 2. Nested under 'reward' key: {reward: {w_event: 1.0, ...}, env: {...}}
+        if 'reward' in data:
+            config_dict = data['reward']
+        else:
+            config_dict = data
+
         return cls(**config_dict)
 
 
@@ -98,6 +108,7 @@ class EnvConfig:
         map_height: Map height in meters
         patrol_points: List of (x, y) coordinates for patrol points
         patrol_point_priorities: Priority weight for each point (0.0-1.0)
+        charging_station_position: (x, y) coordinates of charging station
 
         max_episode_steps: Maximum SMDP steps per episode
         max_episode_time: Maximum episode duration in seconds
@@ -138,6 +149,7 @@ class EnvConfig:
         (10.0, 40.0),
     ])
     patrol_point_priorities: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0, 1.0])
+    charging_station_position: Tuple[float, float] = (5.0, 5.0)  # Default: near corner
 
     # Episode configuration
     max_episode_steps: int = 200
@@ -198,7 +210,16 @@ class EnvConfig:
     def load_yaml(cls, path: str) -> 'EnvConfig':
         """Load configuration from YAML file."""
         with open(path, 'r') as f:
-            config_dict = yaml.safe_load(f)
+            data = yaml.safe_load(f)
+
+        # Handle both formats:
+        # 1. Top-level keys are EnvConfig params: {map_width: 50.0, ...}
+        # 2. Nested under 'env' key: {env: {map_width: 50.0, ...}, reward: {...}}
+        if 'env' in data:
+            config_dict = data['env']
+        else:
+            config_dict = data
+
         return cls(**config_dict)
 
 
@@ -236,7 +257,16 @@ class NetworkConfig:
     def load_yaml(cls, path: str) -> 'NetworkConfig':
         """Load configuration from YAML file."""
         with open(path, 'r') as f:
-            config_dict = yaml.safe_load(f)
+            data = yaml.safe_load(f)
+
+        # Handle both formats:
+        # 1. Top-level keys: {encoder_hidden_dims: [256, 256], ...}
+        # 2. Nested under 'network' key: {network: {...}}
+        if 'network' in data:
+            config_dict = data['network']
+        else:
+            config_dict = data
+
         return cls(**config_dict)
 
 
@@ -346,9 +376,14 @@ class TrainingConfig:
     def load_yaml(cls, path: str) -> 'TrainingConfig':
         """Load configuration from YAML file."""
         with open(path, 'r') as f:
-            config_dict = yaml.safe_load(f)
+            data = yaml.safe_load(f)
+
+        # Handle both formats:
+        # 1. Top-level keys: {learning_rate: 3e-4, ...}
+        # 2. Nested under 'training' key: {training: {...}}
+        if 'training' in data:
+            config_dict = data['training']
+        else:
+            config_dict = data
+
         return cls(**config_dict)
-
-
-# Import numpy for NetworkConfig default
-import numpy as np

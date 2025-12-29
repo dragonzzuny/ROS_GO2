@@ -78,13 +78,15 @@ for candidate in candidates:
 
 ## Training
 
-### 1. Quick training (1M steps)
+### Option A: Single Map Training (Basic)
+
+#### 1. Quick training (1M steps)
 
 ```bash
 python scripts/train.py --seed 42 --cuda
 ```
 
-### 2. Custom configuration
+#### 2. Custom configuration
 
 ```bash
 python scripts/train.py \
@@ -94,6 +96,52 @@ python scripts/train.py \
     --seed 123
 ```
 
+---
+
+### Option B: Multi-Map Training (⭐ Recommended for Generalization)
+
+**일반화된 정책 학습 - 다양한 맵에서 훈련하여 어떤 환경에서도 잘 작동하는 모델**
+
+#### 1. 기본 멀티맵 학습 (6개 다양한 맵)
+
+```bash
+python scripts/train_multi_map.py \
+    --total-timesteps 5000000 \
+    --seed 42 \
+    --cuda
+```
+
+자동으로 다음 맵들을 사용합니다:
+- `map_large_square` - 큰 정사각형 (100×100m)
+- `map_corridor` - 복도형 (120×30m)
+- `map_l_shaped` - L자형 건물 (80×80m)
+- `map_office_building` - 사무실 (90×70m)
+- `map_campus` - 캠퍼스 (150×120m)
+- `map_warehouse` - 창고 (140×100m)
+
+#### 2. 특정 맵들만 선택
+
+```bash
+python scripts/train_multi_map.py \
+    --maps configs/map_large_square.yaml configs/map_office_building.yaml \
+    --map-mode random \
+    --seed 42
+```
+
+#### 3. 커리큘럼 학습 (쉬운 맵 → 어려운 맵)
+
+```bash
+python scripts/train_multi_map.py \
+    --map-mode curriculum \
+    --total-timesteps 10000000 \
+    --seed 42 \
+    --cuda
+```
+
+초반에는 작고 간단한 맵에서 학습하고, 점차 크고 복잡한 맵으로 전환됩니다.
+
+---
+
 ### 3. Monitor with TensorBoard
 
 ```bash
@@ -102,11 +150,16 @@ tensorboard --logdir runs
 
 Open browser to http://localhost:6006
 
+**멀티맵 학습 시 TensorBoard에서 확인 가능:**
+- 각 맵별 성능 (episode_per_map/)
+- 전체 평균 성능 (episode/)
+- 맵별 이벤트 성공률, 순찰 커버리지
+
 ---
 
 ## Evaluation
 
-### Evaluate trained model
+### Option A: Single Map Evaluation
 
 ```bash
 python scripts/evaluate.py \
@@ -114,7 +167,52 @@ python scripts/evaluate.py \
     --episodes 100
 ```
 
-### Quick evaluation
+---
+
+### Option B: Multi-Map Generalization Evaluation (⭐ Recommended)
+
+**여러 맵에서 정책의 일반화 성능을 평가합니다.**
+
+#### 1. 일반화 성능 평가
+
+```bash
+python scripts/evaluate_generalization.py \
+    --model checkpoints/multi_map_ppo/final.pth \
+    --episodes 50 \
+    --save-json
+```
+
+**결과:**
+- `outputs/generalization/generalization_results.json` - 상세 데이터
+- `outputs/generalization/generalization_comparison.png` - 맵별 성능 비교
+- `outputs/generalization/return_distribution.png` - 리턴 분포
+
+**출력 예시:**
+```
+Map                       Return               Event Success        Patrol Coverage
+---------------------------------------------------------------------------------
+map_large_square         523.4 ± 45.2         87.3% ± 8.1%        94.2% ± 3.5%
+map_office_building      -234.1 ± 67.8        72.1% ± 11.2%       88.6% ± 5.2%
+map_campus               312.5 ± 89.3         81.4% ± 9.7%        91.3% ± 4.8%
+```
+
+#### 2. 커버리지 히트맵 시각화
+
+```bash
+python scripts/visualize_coverage.py \
+    --model checkpoints/multi_map_ppo/final.pth \
+    --episodes-per-map 20 \
+    --output outputs/coverage_heatmaps.png
+```
+
+**확인 가능:**
+- 각 맵에서 로봇이 방문한 영역 (히트맵)
+- 순찰 커버리지 통계
+- 사각지대 파악
+
+---
+
+### Quick Code Evaluation
 
 ```python
 from rl_dispatch.env import PatrolEnv

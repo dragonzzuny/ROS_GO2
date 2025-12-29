@@ -1,0 +1,106 @@
+# Campus Map - 야외 캠퍼스 / 단지 (150m x 120m)
+# 목적: 야외 공간, 불규칙한 배치, 긴 이동 거리
+# 면적: 18,000㎡ (약 5,445평)
+
+env:
+  map_width: 150.0
+  map_height: 120.0
+
+  # 16개 포인트 - 건물, 광장, 주차장 등 불규칙 배치
+  patrol_points:
+    # 주 출입구 구역
+    - [20.0, 20.0]   # P0: 정문
+    - [35.0, 25.0]   # P1: 경비실
+
+    # 건물 A 구역 (왼쪽 아래)
+    - [25.0, 45.0]   # P2: A동 현관
+    - [40.0, 50.0]   # P3: A동 후문
+
+    # 중앙 광장
+    - [65.0, 35.0]   # P4: 광장 남쪽
+    - [75.0, 60.0]   # P5: 광장 중앙
+    - [85.0, 45.0]   # P6: 광장 동쪽
+
+    # 건물 B 구역 (오른쪽 아래)
+    - [105.0, 30.0]  # P7: B동 현관
+    - [120.0, 40.0]  # P8: B동 측면
+
+    # 주차장 구역
+    - [130.0, 65.0]  # P9: 주차장 입구
+    - [135.0, 85.0]  # P10: 주차장 중앙
+
+    # 건물 C 구역 (위쪽)
+    - [105.0, 95.0]  # P11: C동 현관
+    - [75.0, 100.0]  # P12: C동 중앙
+
+    # 후문 구역
+    - [50.0, 105.0]  # P13: 후문
+    - [30.0, 95.0]   # P14: 후문 주차장
+
+    # 중앙 통로
+    - [60.0, 75.0]   # P15: 중앙 통로
+
+  patrol_point_priorities:
+    - 2.0  # 정문 (매우 중요)
+    - 1.8  # 경비실
+    - 1.3  # A동 현관
+    - 1.0
+    - 1.2  # 광장
+    - 1.4  # 광장 중앙 (사람 많음)
+    - 1.1
+    - 1.3  # B동 현관
+    - 0.9
+    - 1.5  # 주차장 입구 (중요)
+    - 1.1
+    - 1.3  # C동 현관
+    - 1.0
+    - 1.6  # 후문 (중요)
+    - 1.2
+    - 1.3  # 중앙 통로
+
+  # Charging station - 경비실 근처 (정문 옆)
+  charging_station_position: [30.0, 20.0]
+
+  max_episode_steps: 400
+  max_episode_time: 1500.0  # 25분
+
+  event_generation_rate: 18.0  # 넓은 공간, 많은 이벤트
+  event_min_urgency: 0.2
+  event_max_urgency: 1.0
+  event_min_confidence: 0.5
+
+  robot_max_velocity: 2.5  # 야외라서 빠르게
+  robot_max_angular_velocity: 1.2
+  robot_battery_capacity: 300.0  # 큰 배터리 필요
+  robot_battery_drain_rate: 30.0
+
+  num_candidates: 10
+  candidate_strategies:
+    - "keep_order"
+    - "nearest_first"
+    - "most_overdue_first"
+    - "overdue_eta_balance"
+    - "risk_weighted"
+    - "balanced_coverage"
+    - "overdue_threshold_first"
+    - "windowed_replan"
+    - "minimal_deviation_insert"
+    - "shortest_eta_first"
+
+reward:
+  w_event: 1.0
+  w_patrol: 0.8  # 넓은 공간이라 커버리지 매우 중요
+  w_safety: 1.5  # 야외라서 충돌 위험 적음
+  w_efficiency: 0.2  # 거리가 길어서 효율성 중요
+
+  event_response_bonus: 70.0
+  event_delay_penalty_rate: 0.5  # 거리가 멀어서 지연 어느정도 허용
+  event_max_delay: 200.0  # 넓어서 시간 여유
+
+  patrol_gap_penalty_rate: 0.2  # 커버리지 중요
+  patrol_visit_bonus: 3.5
+
+  collision_penalty: -80.0  # 야외라서 충돌 페널티 적음
+  nav_failure_penalty: -20.0
+
+  distance_penalty_rate: 0.005  # 거리가 멀어서 페널티 작게

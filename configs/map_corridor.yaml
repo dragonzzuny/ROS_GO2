@@ -1,0 +1,78 @@
+# Corridor Map - 긴 복도형 맵 (120m x 30m)
+# 목적: 1차원적인 긴 경로에서의 순찰 최적화
+
+env:
+  map_width: 120.0
+  map_height: 30.0
+
+  # 10개 포인트 - 긴 복도를 따라 배치
+  patrol_points:
+    - [10.0, 15.0]   # P0: 복도 시작
+    - [22.0, 15.0]   # P1
+    - [34.0, 15.0]   # P2
+    - [46.0, 15.0]   # P3
+    - [58.0, 15.0]   # P4: 중앙
+    - [70.0, 15.0]   # P5
+    - [82.0, 15.0]   # P6
+    - [94.0, 15.0]   # P7
+    - [106.0, 15.0]  # P8
+    - [110.0, 15.0]  # P9: 복도 끝
+
+  patrol_point_priorities:
+    - 1.5  # 입구/출구는 중요
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.3  # 중앙 약간 중요
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.5  # 끝도 중요
+
+  # Charging station - 복도 시작 지점
+  charging_station_position: [5.0, 15.0]
+
+  max_episode_steps: 250
+  max_episode_time: 800.0
+
+  event_generation_rate: 8.0
+  event_min_urgency: 0.3
+  event_max_urgency: 1.0
+  event_min_confidence: 0.7
+
+  robot_max_velocity: 1.8
+  robot_max_angular_velocity: 1.0
+  robot_battery_capacity: 150.0
+  robot_battery_drain_rate: 22.0
+
+  num_candidates: 10
+  candidate_strategies:
+    - "keep_order"
+    - "nearest_first"
+    - "most_overdue_first"
+    - "overdue_eta_balance"
+    - "risk_weighted"
+    - "balanced_coverage"
+    - "overdue_threshold_first"
+    - "windowed_replan"
+    - "minimal_deviation_insert"
+    - "shortest_eta_first"
+
+reward:
+  w_event: 1.0
+  w_patrol: 0.7  # 직선이라 커버리지 더 중요
+  w_safety: 2.0
+  w_efficiency: 0.12
+
+  event_response_bonus: 55.0
+  event_delay_penalty_rate: 0.55
+  event_max_delay: 140.0
+
+  patrol_gap_penalty_rate: 0.12
+  patrol_visit_bonus: 2.5
+
+  collision_penalty: -100.0
+  nav_failure_penalty: -20.0
+
+  distance_penalty_rate: 0.009

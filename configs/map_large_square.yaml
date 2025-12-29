@@ -1,0 +1,93 @@
+# Large Square Map - 큰 정사각형 맵 (100m x 100m)
+# 목적: 넓은 공간에서의 순찰 및 이벤트 대응 학습
+
+env:
+  map_width: 100.0
+  map_height: 100.0
+
+  # 12개 포인트 - 외곽 + 내부 순찰
+  patrol_points:
+    # 외곽 순찰 (시계방향)
+    - [15.0, 15.0]   # P0: 좌하단
+    - [50.0, 15.0]   # P1: 하단 중앙
+    - [85.0, 15.0]   # P2: 우하단
+    - [85.0, 50.0]   # P3: 우측 중앙
+    - [85.0, 85.0]   # P4: 우상단
+    - [50.0, 85.0]   # P5: 상단 중앙
+    - [15.0, 85.0]   # P6: 좌상단
+    - [15.0, 50.0]   # P7: 좌측 중앙
+    # 내부 순찰 (대각선)
+    - [30.0, 30.0]   # P8: 내부 좌하
+    - [70.0, 30.0]   # P9: 내부 우하
+    - [70.0, 70.0]   # P10: 내부 우상
+    - [30.0, 70.0]   # P11: 내부 좌상
+
+  patrol_point_priorities:
+    - 1.0  # 외곽 포인트들 - 보통 중요도
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.2  # 내부 포인트들 - 약간 더 중요 (중심 영역)
+    - 1.2
+    - 1.2
+    - 1.2
+
+  # Charging station - 충전 스테이션 (좌하단 입구 근처)
+  charging_station_position: [5.0, 5.0]
+
+  # Episode configuration
+  max_episode_steps: 300
+  max_episode_time: 900.0  # 15분
+
+  # Event generation - 넓은 공간이므로 이벤트 많이 발생
+  event_generation_rate: 12.0
+  event_min_urgency: 0.3
+  event_max_urgency: 1.0
+  event_min_confidence: 0.6
+
+  # Robot dynamics
+  robot_max_velocity: 2.0  # 넓은 공간이므로 속도 증가
+  robot_max_angular_velocity: 1.0
+  robot_battery_capacity: 200.0  # 더 큰 배터리
+  robot_battery_drain_rate: 25.0
+
+  # Candidate configuration - 10 heuristic strategies
+  num_candidates: 10
+  candidate_strategies:
+    - "keep_order"
+    - "nearest_first"
+    - "most_overdue_first"
+    - "overdue_eta_balance"
+    - "risk_weighted"
+    - "balanced_coverage"
+    - "overdue_threshold_first"
+    - "windowed_replan"
+    - "minimal_deviation_insert"
+    - "shortest_eta_first"
+
+reward:
+  # Component weights
+  w_event: 1.0
+  w_patrol: 0.6  # 넓은 공간이므로 커버리지 중요도 증가
+  w_safety: 2.0
+  w_efficiency: 0.15
+
+  # Event response parameters
+  event_response_bonus: 60.0  # 더 큰 보상
+  event_delay_penalty_rate: 0.6
+  event_max_delay: 150.0
+
+  # Patrol coverage parameters
+  patrol_gap_penalty_rate: 0.15
+  patrol_visit_bonus: 3.0
+
+  # Safety parameters
+  collision_penalty: -100.0
+  nav_failure_penalty: -20.0
+
+  # Efficiency parameters
+  distance_penalty_rate: 0.008  # 거리가 길어서 페널티 약간 감소

@@ -153,7 +153,11 @@ class PPOAgent:
                 value.cpu().item(),
             )
 
-    def update(self) -> Dict[str, float]:
+    def update(
+        self,
+        last_value: float = 0.0,
+        last_done: bool = True,
+    ) -> Dict[str, float]:
         """
         Perform PPO update using collected experience.
 
@@ -167,6 +171,10 @@ class PPOAgent:
             e. Backprop and update
         3. Update learning rate (if annealing)
 
+        Args:
+            last_value: Value estimate for last state (for bootstrapping)
+            last_done: Whether last state was terminal
+
         Returns:
             Dictionary of training statistics:
             - policy_loss: Mean policy loss
@@ -176,12 +184,6 @@ class PPOAgent:
             - clipfrac: Fraction of updates clipped
             - explained_variance: How well value function fits returns
         """
-        # Get last value for bootstrapping
-        # Note: In actual training loop, this should come from the final state
-        # For now, we'll use 0 (assumes episode ended)
-        last_value = 0.0
-        last_done = True
-
         # Compute returns and advantages
         self.buffer.compute_returns_and_advantages(last_value, last_done)
 

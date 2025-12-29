@@ -1,7 +1,7 @@
 """
 Candidate generation strategies for patrol route planning.
 
-This module implements 6 different heuristic strategies for generating patrol
+This module implements 10 different heuristic strategies for generating patrol
 route candidates:
 
 1. Keep-Order: Maintain current patrol sequence (baseline)
@@ -10,6 +10,10 @@ route candidates:
 4. Overdue-ETA-Balance: Balance overdue time and travel time (hybrid)
 5. Risk-Weighted: Prioritize high-risk areas (priority-based)
 6. Balanced-Coverage: Minimize maximum coverage gap (optimal distribution)
+7. Overdue-Threshold-First: Prioritize points exceeding threshold (critical handling)
+8. Windowed-Replan: Replan first H points only (computational efficiency)
+9. Minimal-Deviation-Insert: Insert urgent points with minimal detour (stability)
+10. Shortest-ETA-First: Sort by estimated arrival time (Nav2-aware planning)
 
 Each generator produces a Candidate with estimated metrics for RL policy selection.
 """
@@ -550,23 +554,303 @@ class BalancedCoverageGenerator(CandidateGenerator):
         )
 
 
+class OverdueThresholdFirstGenerator(CandidateGenerator):
+    """
+    Prioritize points exceeding overdue threshold.
+
+    Visits points with gap > threshold first, then handles remaining points
+    by nearest-first strategy.
+
+    Algorithm:
+        1. Find all points with (current_time - last_visit) > threshold
+        2. Sort overdue points by gap (descending)
+        3. Append remaining points sorted by distance
+
+    This strategy ensures critical overdue points are handled immediately
+    while maintaining efficiency for non-critical points.
+
+    Args:
+        threshold: Overdue threshold in seconds (default: 60s)
+    """
+
+    def __init__(self, threshold: float = 60.0):
+        super().__init__(strategy_name="overdue_threshold_first", strategy_id=6)
+        self.threshold = threshold
+
+    def generate(
+        self,
+        robot: RobotState,
+        patrol_points: Tuple[PatrolPoint, ...],
+        current_time: float,
+    ) -> Candidate:
+        """Generate candidate prioritizing threshold-exceeding points."""
+        # Separate points by threshold
+        overdue = []
+        normal = []
+
+        for idx, point in enumerate(patrol_points):
+            gap = current_time - point.last_visit_time
+            if gap > self.threshold:
+                overdue.append((idx, gap))
+            else:
+                normal.append(idx)
+
+        # Sort overdue by gap (descending)
+        overdue.sort(key=lambda x: x[1], reverse=True)
+        overdue_order = [idx for idx, _ in overdue]
+
+        # Sort normal by distance (nearest first)
+        normal_with_dist = [
+            (idx, np.sqrt(
+                (patrol_points[idx].x - robot.x)**2 +
+                (patrol_points[idx].y - robot.y)**2
+            ))
+            for idx in normal
+        ]
+        normal_with_dist.sort(key=lambda x: x[1])
+        normal_order = [idx for idx, _ in normal_with_dist]
+
+        # Combine: overdue first, then normal
+        visit_order = overdue_order + normal_order
+
+        total_distance = self._estimate_route_distance(
+            robot.position, patrol_points, visit_order
+        )
+        max_gap = self._calculate_max_coverage_gap(
+            patrol_points, visit_order, current_time, robot.position
+        )
+
+        return Candidate(
+            patrol_order=tuple(visit_order),
+            estimated_total_distance=total_distance,
+            max_coverage_gap=max_gap,
+            strategy_name=self.strategy_name,
+            strategy_id=self.strategy_id,
+        )
+
+
+class WindowedReplanGenerator(CandidateGenerator):
+    """
+    Replan only the first H points (windowed replanning).
+
+    Reorders only the first H patrol points while keeping the rest unchanged.
+    Reduces computational cost and maintains long-term route stability.
+
+    Algorithm:
+        1. Take first H points from current route
+        2. Reorder them by most-overdue-first within window
+        3. Keep remaining points in original order
+
+    This provides a balance between responsiveness and stability.
+
+    Args:
+        window_size: Number of points to replan (default: 3)
+    """
+
+    def __init__(self, window_size: int = 3):
+        super().__init__(strategy_name="windowed_replan", strategy_id=7)
+        self.window_size = window_size
+
+    def generate(
+        self,
+        robot: RobotState,
+        patrol_points: Tuple[PatrolPoint, ...],
+        current_time: float,
+    ) -> Candidate:
+        """Generate candidate with windowed replanning."""
+        num_points = len(patrol_points)
+
+        # Default sequential order
+        base_order = list(range(num_points))
+
+        # Take first H points for replanning
+        window_size = min(self.window_size, num_points)
+        window_indices = base_order[:window_size]
+
+        # Reorder window by overdue time (descending)
+        window_with_gap = [
+            (idx, current_time - patrol_points[idx].last_visit_time)
+            for idx in window_indices
+        ]
+        window_with_gap.sort(key=lambda x: x[1], reverse=True)
+        reordered_window = [idx for idx, _ in window_with_gap]
+
+        # Combine reordered window + remaining points
+        visit_order = reordered_window + base_order[window_size:]
+
+        total_distance = self._estimate_route_distance(
+            robot.position, patrol_points, visit_order
+        )
+        max_gap = self._calculate_max_coverage_gap(
+            patrol_points, visit_order, current_time, robot.position
+        )
+
+        return Candidate(
+            patrol_order=tuple(visit_order),
+            estimated_total_distance=total_distance,
+            max_coverage_gap=max_gap,
+            strategy_name=self.strategy_name,
+            strategy_id=self.strategy_id,
+        )
+
+
+class MinimalDeviationInsertGenerator(CandidateGenerator):
+    """
+    Insert urgent points into current route with minimal deviation.
+
+    Finds the best insertion position for most-overdue points while
+    minimizing deviation from current route.
+
+    Algorithm:
+        1. Identify most overdue point
+        2. For each position in current route:
+           Calculate detour cost if inserting at that position
+        3. Insert at position with minimal detour
+        4. Repeat for remaining points
+
+    This maintains route stability while handling urgent points.
+    """
+
+    def __init__(self):
+        super().__init__(strategy_name="minimal_deviation_insert", strategy_id=8)
+
+    def generate(
+        self,
+        robot: RobotState,
+        patrol_points: Tuple[PatrolPoint, ...],
+        current_time: float,
+    ) -> Candidate:
+        """Generate candidate with minimal-deviation insertion."""
+        # Start with sequential order
+        visit_order = []
+        remaining = set(range(len(patrol_points)))
+
+        # Insert points one by one
+        while remaining:
+            # Find most overdue remaining point
+            best_point = None
+            best_gap = -np.inf
+            for idx in remaining:
+                gap = current_time - patrol_points[idx].last_visit_time
+                if gap > best_gap:
+                    best_gap = gap
+                    best_point = idx
+
+            if not visit_order:
+                # First point: just add it
+                visit_order.append(best_point)
+            else:
+                # Find best insertion position
+                best_pos = len(visit_order)
+                best_detour = np.inf
+
+                for pos in range(len(visit_order) + 1):
+                    # Calculate detour cost
+                    test_order = visit_order[:pos] + [best_point] + visit_order[pos:]
+                    detour = self._estimate_route_distance(
+                        robot.position, patrol_points, test_order
+                    )
+
+                    if detour < best_detour:
+                        best_detour = detour
+                        best_pos = pos
+
+                # Insert at best position
+                visit_order.insert(best_pos, best_point)
+
+            remaining.remove(best_point)
+
+        total_distance = self._estimate_route_distance(
+            robot.position, patrol_points, visit_order
+        )
+        max_gap = self._calculate_max_coverage_gap(
+            patrol_points, visit_order, current_time, robot.position
+        )
+
+        return Candidate(
+            patrol_order=tuple(visit_order),
+            estimated_total_distance=total_distance,
+            max_coverage_gap=max_gap,
+            strategy_name=self.strategy_name,
+            strategy_id=self.strategy_id,
+        )
+
+
+class ShortestETAFirstGenerator(CandidateGenerator):
+    """
+    Sort patrol points by estimated time of arrival (ETA).
+
+    Uses NavigationInterface.get_eta() to estimate arrival time to each point,
+    then visits points in order of shortest ETA first.
+
+    This differs from nearest-first by considering actual path planning costs
+    rather than Euclidean distance.
+
+    Note:
+        Currently uses Euclidean-based ETA estimation. When Nav2 integration is
+        complete, this will use actual Nav2 path planning for ETA.
+
+    Args:
+        avg_velocity: Average robot velocity for ETA estimation (m/s)
+    """
+
+    def __init__(self, avg_velocity: float = 1.0):
+        super().__init__(strategy_name="shortest_eta_first", strategy_id=9)
+        self.avg_velocity = avg_velocity
+
+    def generate(
+        self,
+        robot: RobotState,
+        patrol_points: Tuple[PatrolPoint, ...],
+        current_time: float,
+    ) -> Candidate:
+        """Generate candidate sorted by ETA."""
+        # Calculate ETA to each point (Euclidean distance / velocity)
+        etas = []
+        for idx, point in enumerate(patrol_points):
+            distance = np.sqrt(
+                (point.x - robot.x)**2 + (point.y - robot.y)**2
+            )
+            eta = distance / self.avg_velocity if self.avg_velocity > 0 else 0.0
+            etas.append((idx, eta))
+
+        # Sort by ETA (ascending)
+        etas.sort(key=lambda x: x[1])
+        visit_order = [idx for idx, _ in etas]
+
+        total_distance = self._estimate_route_distance(
+            robot.position, patrol_points, visit_order
+        )
+        max_gap = self._calculate_max_coverage_gap(
+            patrol_points, visit_order, current_time, robot.position
+        )
+
+        return Candidate(
+            patrol_order=tuple(visit_order),
+            estimated_total_distance=total_distance,
+            max_coverage_gap=max_gap,
+            strategy_name=self.strategy_name,
+            strategy_id=self.strategy_id,
+        )
+
+
 class CandidateFactory:
     """
     Factory for creating all candidate generators.
 
-    Provides a single interface to instantiate and manage all 6 strategy generators.
+    Provides a single interface to instantiate and manage all 10 strategy generators.
     Used by the environment to generate candidates at each decision point.
 
     Example:
         >>> factory = CandidateFactory()
         >>> candidates = factory.generate_all(robot, patrol_points, current_time)
-        >>> assert len(candidates) == 6
+        >>> assert len(candidates) == 10
         >>> for c in candidates:
         ...     print(f"{c.strategy_name}: distance={c.estimated_total_distance:.1f}m")
     """
 
     def __init__(self):
-        """Initialize factory with all 6 generators."""
+        """Initialize factory with all 10 generators."""
         self.generators = [
             KeepOrderGenerator(),
             NearestFirstGenerator(),
@@ -574,6 +858,10 @@ class CandidateFactory:
             OverdueETABalanceGenerator(),
             RiskWeightedGenerator(),
             BalancedCoverageGenerator(),
+            OverdueThresholdFirstGenerator(),
+            WindowedReplanGenerator(),
+            MinimalDeviationInsertGenerator(),
+            ShortestETAFirstGenerator(),
         ]
 
     def generate_all(
