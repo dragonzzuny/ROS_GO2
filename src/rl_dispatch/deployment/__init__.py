@@ -12,15 +12,37 @@ Usage:
 
     # Real robot mode
     robot = create_robot_interface(mode="real", config=real_config)
+
+    # Run trained policy
+    from rl_dispatch.deployment import PolicyRunner
+    runner = PolicyRunner(model_path="checkpoints/best_model.pth", mode="simulation")
+    runner.connect()
+    runner.run_episode()
 """
 
-from .robot_interface import RobotInterface, create_robot_interface
+from .robot_interface import (
+    RobotInterface,
+    RobotState,
+    NavigationGoal,
+    NavigationFeedback,
+    SimulationRobotInterface,
+    create_robot_interface,
+)
 from .config import DeploymentConfig, SimulationConfig, RealRobotConfig
+from .inference import PolicyRunner
 
 __all__ = [
+    # Interfaces
     "RobotInterface",
+    "RobotState",
+    "NavigationGoal",
+    "NavigationFeedback",
+    "SimulationRobotInterface",
     "create_robot_interface",
+    # Config
     "DeploymentConfig",
     "SimulationConfig",
     "RealRobotConfig",
+    # Inference
+    "PolicyRunner",
 ]
