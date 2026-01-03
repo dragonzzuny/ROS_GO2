@@ -76,3 +76,11 @@ dmypy.json
 # Environment
 .env
 .env.local
+
+# Archives (large files)
+*.zip
+*.tar.gz
+*.rar
+
+# Zone Identifier files (Windows/WSL)
+*:Zone.Identifier

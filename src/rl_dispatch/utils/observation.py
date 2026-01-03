@@ -125,9 +125,9 @@ class ObservationProcessor:
     Processes State objects into normalized Observation vectors.
 
     Handles feature extraction, normalization, and edge cases.
-    The output is a 77-dimensional vector suitable for neural network input.
+    The output is a 88-dimensional vector suitable for neural network input.
 
-    Observation Structure (77D):
+    Observation Structure (88D) - Reviewer 박용준: Phase 4 Enhanced:
         - goal_relative_vec (2D): Normalized (dx, dy) to current goal
         - heading_sin_cos (2D): (sin(theta), cos(theta))
         - velocity_angular (2D): Normalized (v, omega)
@@ -135,6 +135,10 @@ class ObservationProcessor:
         - lidar_ranges (64D): Normalized LiDAR ranges
         - event_features (4D): [exists, urgency, confidence, elapsed_time_norm]
         - patrol_features (2D): [distance_to_next_norm, coverage_gap_ratio]
+        - event_risk_level (1D): Risk level normalized [0, 1] (Phase 4)
+        - patrol_crisis (3D): [max_gap_norm, critical_count_norm, crisis_score] (Phase 4)
+        - candidate_feasibility (6D): Feasibility score per candidate [0, 1] (Phase 4)
+        - urgency_risk_product (1D): urgency × risk combined signal (Phase 4)
 
     Attributes:
         use_normalization: Whether to apply running normalization
@@ -145,11 +149,12 @@ class ObservationProcessor:
         max_lidar_range: Maximum LiDAR range (for normalization)
         max_event_delay: Maximum event delay before failure (for normalization)
         max_coverage_gap: Maximum expected coverage gap (for normalization)
+        max_num_patrol_points: Maximum number of patrol points (for normalization)
 
     Example:
         >>> processor = ObservationProcessor(use_normalization=True)
         >>> obs = processor.process(state, update_stats=True)
-        >>> assert obs.dim == 77
+        >>> assert obs.vector.shape[0] == 88
     """
 
     def __init__(
@@ -161,6 +166,7 @@ class ObservationProcessor:
         max_lidar_range: float = 10.0,
         max_event_delay: float = 120.0,
         max_coverage_gap: float = 300.0,
+        max_num_patrol_points: int = 30,  # Reviewer 박용준: Phase 4
     ):
         """
         Initialize observation processor.
@@ -173,9 +179,10 @@ class ObservationProcessor:
             max_lidar_range: Maximum LiDAR range (meters)
             max_event_delay: Maximum event delay (seconds)
             max_coverage_gap: Maximum coverage gap (seconds)
+            max_num_patrol_points: Maximum number of patrol points (for crisis normalization)
         """
         self.use_normalization = use_normalization
-        self.normalizer = RunningMeanStd(shape=(77,))
+        self.normalizer = RunningMeanStd(shape=(88,))  # Reviewer 박용준: Phase 4 - 77 → 88
 
         self.max_goal_distance = max_goal_distance
         self.max_velocity = max_velocity
@@ -183,6 +190,7 @@ class ObservationProcessor:
         self.max_lidar_range = max_lidar_range
         self.max_event_delay = max_event_delay
         self.max_coverage_gap = max_coverage_gap
+        self.max_num_patrol_points = max_num_patrol_points  # Reviewer 박용준: Phase 4
 
     def process(
         self,
@@ -197,10 +205,10 @@ class ObservationProcessor:
             update_stats: Whether to update running statistics
 
         Returns:
-            77-dimensional Observation
+            88-dimensional Observation (Phase 4 enhanced)
         """
-        # Initialize observation vector
-        obs_vector = np.zeros(77, dtype=np.float32)
+        # Initialize observation vector (Reviewer 박용준: Phase 4 - 77 → 88)
+        obs_vector = np.zeros(88, dtype=np.float32)
 
         # 1. Goal relative vector (2D) - indices 0:2
         goal_dx, goal_dy = self._extract_goal_relative(state)
@@ -233,6 +241,20 @@ class ObservationProcessor:
         # 7. Patrol features (2D) - indices 75:77
         patrol_features = self._extract_patrol_features(state)
         obs_vector[75:77] = patrol_features
+
+        # 8. Event risk level (1D) - index 77 (Reviewer 박용준: Phase 4)
+        obs_vector[77] = self._extract_event_risk(state)
+
+        # 9. Patrol crisis indicators (3D) - indices 78:81 (Reviewer 박용준: Phase 4)
+        patrol_crisis = self._extract_patrol_crisis(state)
+        obs_vector[78:81] = patrol_crisis
+
+        # 10. Candidate feasibility (6D) - indices 81:87 (Reviewer 박용준: Phase 4)
+        candidate_feasibility = self._extract_candidate_feasibility(state)
+        obs_vector[81:87] = candidate_feasibility
+
+        # 11. Urgency-risk combined signal (1D) - index 87 (Reviewer 박용준: Phase 4)
+        obs_vector[87] = self._extract_urgency_risk_combined(state)
 
         # Apply running normalization if enabled
         if self.use_normalization:
@@ -349,6 +371,147 @@ class ObservationProcessor:
             )
 
         return features
+
+    def _extract_event_risk(self, state: State) -> float:
+        """
+        Extract event risk level.
+
+        Reviewer 박용준: Phase 4 - Event risk information
+
+        Args:
+            state: Environment state
+
+        Returns:
+            Normalized risk level [0, 1], 0 if no event
+        """
+        if not state.has_event:
+            return 0.0
+
+        event = state.current_event
+        # Risk level is 1-9, normalize to [0, 1]
+        risk_level = getattr(event, 'risk_level', 5)  # Default to medium risk
+        return risk_level / 9.0
+
+    def _extract_patrol_crisis(self, state: State) -> npt.NDArray[np.float32]:
+        """
+        Extract patrol crisis indicators.
+
+        Reviewer 박용준: Phase 4 - Patrol crisis awareness
+
+        Features (3D):
+            [0] max_gap_normalized: Max coverage gap / threshold
+            [1] critical_count_normalized: Count of critical points / total points
+            [2] crisis_score: Overall crisis level [0, 1+]
+
+        Args:
+            state: Environment state
+
+        Returns:
+            3D patrol crisis vector
+        """
+        features = np.zeros(3, dtype=np.float32)
+
+        if len(state.patrol_points) == 0:
+            return features
+
+        # Calculate gaps for all points
+        gaps = [
+            state.current_time - point.last_visit_time
+            for point in state.patrol_points
+        ]
+
+        # 1. Max gap normalized
+        max_gap = max(gaps)
+        features[0] = np.clip(max_gap / self.max_coverage_gap, 0.0, 2.0)  # Allow >1 for crisis
+
+        # 2. Critical point count (gap > threshold)
+        crisis_threshold = self.max_coverage_gap * 0.5  # 50% of max is "critical"
+        critical_count = sum(1 for gap in gaps if gap > crisis_threshold)
+        features[1] = critical_count / max(len(state.patrol_points), 1)
+
+        # 3. Overall crisis score (weighted by priority)
+        weighted_gap_sum = sum(
+            (state.current_time - p.last_visit_time) * p.priority
+            for p in state.patrol_points
+        )
+        total_priority = sum(p.priority for p in state.patrol_points)
+        avg_weighted_gap = weighted_gap_sum / max(total_priority, 1.0)
+        features[2] = np.clip(avg_weighted_gap / self.max_coverage_gap, 0.0, 2.0)
+
+        return features
+
+    def _extract_candidate_feasibility(self, state: State) -> npt.NDArray[np.float32]:
+        """
+        Extract candidate feasibility hints.
+
+        Reviewer 박용준: Phase 4 - Candidate quality information
+
+        For each of the 6 candidates, provide a feasibility score:
+            - 1.0: Highly feasible (all goals reachable, low risk)
+            - 0.5: Moderately feasible (some uncertainty)
+            - 0.0: Infeasible (contains unreachable goals)
+
+        Args:
+            state: Environment state
+
+        Returns:
+            6D feasibility vector (one per candidate)
+        """
+        features = np.zeros(6, dtype=np.float32)
+
+        if len(state.candidates) == 0:
+            return features
+
+        # For each candidate, estimate feasibility
+        for i, candidate in enumerate(state.candidates[:6]):  # Ensure max 6
+            if i >= 6:
+                break
+
+            # Check if candidate route is feasible
+            # Heuristic: If total distance is reasonable and no inf distances
+            total_distance = candidate.estimated_total_distance
+
+            if total_distance == np.inf or total_distance < 0:
+                # Infeasible route
+                features[i] = 0.0
+            elif total_distance > self.max_goal_distance * 10:
+                # Very long route - low feasibility
+                features[i] = 0.3
+            else:
+                # Feasible route - score based on route length
+                # Shorter routes = higher feasibility
+                normalized_dist = total_distance / (self.max_goal_distance * 5)
+                features[i] = np.clip(1.0 - normalized_dist * 0.5, 0.5, 1.0)
+
+        return features
+
+    def _extract_urgency_risk_combined(self, state: State) -> float:
+        """
+        Extract combined urgency-risk signal.
+
+        Reviewer 박용준: Phase 4 - Combined event priority signal
+
+        Combines event urgency and risk level into single priority signal.
+        Helps agent quickly identify high-priority events.
+
+        Args:
+            state: Environment state
+
+        Returns:
+            Combined urgency × risk signal [0, 1], 0 if no event
+        """
+        if not state.has_event:
+            return 0.0
+
+        event = state.current_event
+        urgency = event.urgency
+        risk_level = getattr(event, 'risk_level', 5)
+        risk_normalized = risk_level / 9.0
+
+        # Geometric mean for combined signal (prevents one dimension from dominating)
+        combined = np.sqrt(urgency * risk_normalized)
+
+        return float(np.clip(combined, 0.0, 1.0))
 
     def reset_stats(self) -> None:
         """Reset running statistics."""

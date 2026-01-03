@@ -359,7 +359,9 @@ class PPOAgent:
         Args:
             path: File path to load from
         """
-        checkpoint = torch.load(path, map_location=self.device)
+        # PyTorch 2.6+: Need weights_only=False to load custom classes (TrainingConfig, etc.)
+        # This is safe since we trust our own checkpoints
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.network.load_state_dict(checkpoint["network_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.global_step = checkpoint["global_step"]

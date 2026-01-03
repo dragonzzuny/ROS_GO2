@@ -19,7 +19,7 @@ Each generator produces a Candidate with estimated metrics for RL policy selecti
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import numpy as np
 
 from rl_dispatch.core.types import Candidate, PatrolPoint, RobotState
@@ -51,6 +51,52 @@ class CandidateGenerator(ABC):
         """
         self.strategy_name = strategy_name
         self.strategy_id = strategy_id
+        self.nav_interface = None  # Reviewer 박용준: Will be set by CandidateFactory
+
+    def set_nav_interface(self, nav_interface):
+        """
+        Set navigation interface for realistic path planning.
+
+        Reviewer 박용준: Enables A* pathfinding for feasibility checks and ETA.
+
+        Args:
+            nav_interface: NavigationInterface instance (SimulatedNav2 or RealNav2)
+        """
+        self.nav_interface = nav_interface
+
+    def _get_distance_between(
+        self,
+        pos1: Tuple[float, float],
+        pos2: Tuple[float, float],
+    ) -> float:
+        """
+        Get distance between two positions.
+
+        Reviewer 박용준: Uses A* path distance if available, else Euclidean.
+        """
+        # Try to use A* pathfinder if available
+        if self.nav_interface is not None:
+            if hasattr(self.nav_interface, 'pathfinder') and self.nav_interface.pathfinder is not None:
+                return self.nav_interface.pathfinder.get_distance(pos1, pos2)
+
+        # Fallback to Euclidean distance
+        return np.sqrt((pos2[0] - pos1[0])**2 + (pos2[1] - pos1[1])**2)
+
+    def _get_eta(
+        self,
+        start: Tuple[float, float],
+        goal: Tuple[float, float],
+    ) -> float:
+        """
+        Get estimated time of arrival from start to goal.
+
+        Reviewer 박용준: Uses NavigationInterface.get_eta() if available.
+        """
+        if self.nav_interface is not None:
+            return self.nav_interface.get_eta(start, goal)
+        else:
+            distance = np.sqrt((goal[0] - start[0])**2 + (goal[1] - start[1])**2)
+            return distance / 1.0
 
     @abstractmethod
     def generate(
@@ -81,8 +127,7 @@ class CandidateGenerator(ABC):
         """
         Estimate total distance for a patrol route.
 
-        Calculates Euclidean distance from robot's current position through
-        all patrol points in the given order.
+        Reviewer 박용준: Now uses A* path distance instead of Euclidean.
 
         Args:
             robot_pos: Robot's (x, y) position
@@ -100,10 +145,16 @@ class CandidateGenerator(ABC):
 
         for idx in visit_order:
             point = patrol_points[idx]
-            dx = point.x - current_pos[0]
-            dy = point.y - current_pos[1]
-            total_distance += np.sqrt(dx**2 + dy**2)
-            current_pos = (point.x, point.y)
+            next_pos = (point.x, point.y)
+
+            # Reviewer 박용준: Use A* distance
+            distance = self._get_distance_between(current_pos, next_pos)
+
+            if distance == np.inf:
+                return np.inf  # Infeasible route
+
+            total_distance += distance
+            current_pos = next_pos
 
         return total_distance
 
@@ -118,14 +169,14 @@ class CandidateGenerator(ABC):
         """
         Calculate maximum coverage gap for a route.
 
-        Estimates the maximum time any patrol point will go unvisited.
+        Reviewer 박용준: Now uses A* ETA instead of Euclidean distance.
 
         Args:
             patrol_points: All patrol points
             visit_order: Proposed visit sequence
             current_time: Current episode time
             robot_pos: Robot's current position
-            avg_velocity: Average robot velocity for ETA estimation
+            avg_velocity: Average robot velocity for ETA estimation (unused if nav_interface available)
 
         Returns:
             Maximum coverage gap in seconds
@@ -139,19 +190,21 @@ class CandidateGenerator(ABC):
 
         for idx in visit_order:
             point = patrol_points[idx]
+            next_pos = (point.x, point.y)
 
-            # Calculate travel time to this point
-            distance = np.sqrt(
-                (point.x - current_pos[0])**2 + (point.y - current_pos[1])**2
-            )
-            travel_time = distance / avg_velocity
-            estimated_time += travel_time
+            # Reviewer 박용준: Use realistic ETA
+            eta = self._get_eta(current_pos, next_pos)
+
+            if eta == np.inf:
+                return np.inf  # Infeasible
+
+            estimated_time += eta
 
             # Calculate gap: time from last visit to estimated arrival
             time_since_last_visit = estimated_time - point.last_visit_time
             max_gap = max(max_gap, time_since_last_visit)
 
-            current_pos = (point.x, point.y)
+            current_pos = next_pos
 
         return max_gap
 
@@ -228,14 +281,20 @@ class NearestFirstGenerator(CandidateGenerator):
         current_pos = robot.position
 
         while remaining:
-            # Find nearest unvisited point
-            nearest_idx = min(
-                remaining,
-                key=lambda idx: np.sqrt(
-                    (patrol_points[idx].x - current_pos[0])**2 +
-                    (patrol_points[idx].y - current_pos[1])**2
-                )
-            )
+            # Reviewer 박용준: Find nearest using A* distance
+            nearest_idx = None
+            nearest_dist = np.inf
+
+            for idx in remaining:
+                point = patrol_points[idx]
+                dist = self._get_distance_between(current_pos, point.position)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest_idx = idx
+
+            if nearest_idx is None:
+                nearest_idx = min(remaining)
+
             visit_order.append(nearest_idx)
             remaining.remove(nearest_idx)
             current_pos = patrol_points[nearest_idx].position
@@ -354,10 +413,11 @@ class OverdueETABalanceGenerator(CandidateGenerator):
             for idx in remaining:
                 point = patrol_points[idx]
 
-                # Calculate distance
-                distance = np.sqrt(
-                    (point.x - current_pos[0])**2 + (point.y - current_pos[1])**2
-                )
+                # Reviewer 박용준: Calculate A* distance
+                distance = self._get_distance_between(current_pos, point.position)
+
+                if distance == np.inf:
+                    continue  # Skip infeasible
 
                 # Calculate overdue time
                 overdue_time = estimated_time - point.last_visit_time
@@ -373,15 +433,16 @@ class OverdueETABalanceGenerator(CandidateGenerator):
                     best_idx = idx
 
             # Add best point to route
+            if best_idx is None:
+                break  # No feasible points remain
+
             visit_order.append(best_idx)
             remaining.remove(best_idx)
 
             # Update position and time estimate
             point = patrol_points[best_idx]
-            distance = np.sqrt(
-                (point.x - current_pos[0])**2 + (point.y - current_pos[1])**2
-            )
-            estimated_time += distance / 1.0  # Assume 1 m/s average speed
+            eta = self._get_eta(current_pos, point.position)
+            estimated_time += eta if eta != np.inf else 10.0  # Fallback
             current_pos = point.position
 
         total_distance = self._estimate_route_distance(
@@ -504,12 +565,13 @@ class BalancedCoverageGenerator(CandidateGenerator):
             for idx in remaining:
                 point = patrol_points[idx]
 
-                # Calculate ETA to this point
-                distance = np.sqrt(
-                    (point.x - current_pos[0])**2 + (point.y - current_pos[1])**2
-                )
-                travel_time = distance / 1.0  # Assume 1 m/s
-                arrival_time = estimated_time + travel_time
+                # Reviewer 박용준: Calculate ETA using A*
+                eta = self._get_eta(current_pos, point.position)
+
+                if eta == np.inf:
+                    continue  # Skip infeasible
+
+                arrival_time = estimated_time + eta
 
                 # Calculate max gap if we visit this point next
                 temp_projected = projected_visit_times.copy()
@@ -517,7 +579,7 @@ class BalancedCoverageGenerator(CandidateGenerator):
 
                 # Max gap across all points (including remaining)
                 max_gap = max(
-                    estimated_time + travel_time - temp_projected[i]
+                    estimated_time + eta - temp_projected[i]
                     for i in remaining
                 )
 
@@ -526,15 +588,16 @@ class BalancedCoverageGenerator(CandidateGenerator):
                     best_idx = idx
 
             # Add best point
+            if best_idx is None:
+                break  # No feasible points remain
+
             visit_order.append(best_idx)
             remaining.remove(best_idx)
 
             # Update state
             point = patrol_points[best_idx]
-            distance = np.sqrt(
-                (point.x - current_pos[0])**2 + (point.y - current_pos[1])**2
-            )
-            estimated_time += distance / 1.0
+            eta = self._get_eta(current_pos, point.position)
+            estimated_time += eta if eta != np.inf else 10.0
             projected_visit_times[best_idx] = estimated_time
             current_pos = point.position
 
@@ -599,12 +662,9 @@ class OverdueThresholdFirstGenerator(CandidateGenerator):
         overdue.sort(key=lambda x: x[1], reverse=True)
         overdue_order = [idx for idx, _ in overdue]
 
-        # Sort normal by distance (nearest first)
+        # Reviewer 박용준: Sort normal by A* distance (nearest first)
         normal_with_dist = [
-            (idx, np.sqrt(
-                (patrol_points[idx].x - robot.x)**2 +
-                (patrol_points[idx].y - robot.y)**2
-            ))
+            (idx, self._get_distance_between(robot.position, patrol_points[idx].position))
             for idx in normal
         ]
         normal_with_dist.sort(key=lambda x: x[1])
@@ -805,13 +865,10 @@ class ShortestETAFirstGenerator(CandidateGenerator):
         current_time: float,
     ) -> Candidate:
         """Generate candidate sorted by ETA."""
-        # Calculate ETA to each point (Euclidean distance / velocity)
+        # Reviewer 박용준: Calculate ETA using A* pathfinding
         etas = []
         for idx, point in enumerate(patrol_points):
-            distance = np.sqrt(
-                (point.x - robot.x)**2 + (point.y - robot.y)**2
-            )
-            eta = distance / self.avg_velocity if self.avg_velocity > 0 else 0.0
+            eta = self._get_eta(robot.position, point.position)
             etas.append((idx, eta))
 
         # Sort by ETA (ascending)
@@ -863,6 +920,20 @@ class CandidateFactory:
             MinimalDeviationInsertGenerator(),
             ShortestETAFirstGenerator(),
         ]
+        self.nav_interface = None  # Reviewer 박용준: Will be set by environment
+
+    def set_nav_interface(self, nav_interface):
+        """
+        Set navigation interface for all generators.
+
+        Reviewer 박용준: CRITICAL - Must be called before generate_all()!
+
+        Args:
+            nav_interface: NavigationInterface instance with pathfinder
+        """
+        self.nav_interface = nav_interface
+        for generator in self.generators:
+            generator.set_nav_interface(nav_interface)
 
     def generate_all(
         self,

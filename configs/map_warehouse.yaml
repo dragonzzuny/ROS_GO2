@@ -33,6 +33,7 @@ env:
     - [[130.0, 60.0], [138.0, 60.0], [138.0, 75.0], [130.0, 75.0]]
 
   # 12개 포인트 - 창고 구역, 하역장, 통로 등
+  # Reviewer 박용준: Fixed patrol points to be outside storage areas
   patrol_points:
     # 하역장 구역 (아래쪽)
     - [15.0, 15.0]   # P0: 하역장 A
@@ -47,10 +48,10 @@ env:
     - [50.0, 40.0]   # P7: 서쪽 통로
     - [15.0, 50.0]   # P8: 서쪽 끝
 
-    # 저장 구역 (위쪽)
-    - [30.0, 75.0]   # P9: 저장 A
-    - [70.0, 85.0]   # P10: 저장 B (중앙)
-    - [110.0, 75.0]  # P11: 저장 C
+    # 저장 구역 (위쪽) - Fixed: moved outside storage areas
+    - [30.0, 63.0]   # P9: 저장 A (Upper storage area 1 밖 아래쪽)
+    - [70.0, 68.0]   # P10: 저장 B (Upper storage area 2 밖 아래쪽)
+    - [110.0, 63.0]  # P11: 저장 C (Upper storage area 3 밖 아래쪽)
 
   patrol_point_priorities:
     - 1.5  # 하역장들 - 중요

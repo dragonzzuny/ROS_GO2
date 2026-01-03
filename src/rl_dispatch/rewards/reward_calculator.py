@@ -66,6 +66,12 @@ class RewardCalculator:
         """
         self.config = config
 
+        # Reviewer 박용준: Per-component normalizers for Phase 2
+        self.event_normalizer = ComponentNormalizer("event")
+        self.patrol_normalizer = ComponentNormalizer("patrol")
+        self.efficiency_normalizer = ComponentNormalizer("efficiency")
+        # Safety is NOT normalized (sparse, critical signal)
+
     def calculate(
         self,
         robot: RobotState,
@@ -99,15 +105,15 @@ class RewardCalculator:
         Returns:
             RewardComponents with all components and total
         """
-        # Calculate each component (Reviewer 박용준: Pass proximity_resolution)
-        r_event = self._calculate_event_reward(
+        # Calculate each component (RAW values)
+        r_event_raw = self._calculate_event_reward(
             event=event,
             current_time=current_time,
             event_resolved=event_resolved,
             proximity_resolution=proximity_resolution,
         )
 
-        r_patrol = self._calculate_patrol_reward(
+        r_patrol_raw = self._calculate_patrol_reward(
             patrol_points=patrol_points,
             current_time=current_time,
             patrol_point_visited=patrol_point_visited,
@@ -118,20 +124,33 @@ class RewardCalculator:
             nav_failure=nav_failure,
         )
 
-        r_efficiency = self._calculate_efficiency_reward(
+        r_efficiency_raw = self._calculate_efficiency_reward(
             distance_traveled=distance_traveled,
         )
 
-        # Create reward components structure
+        # Reviewer 박용준: Phase 2 - Per-component normalization
+        # Normalize each component separately (except safety - critical sparse signal)
+        r_event_norm = self.event_normalizer.normalize(r_event_raw)
+        r_patrol_norm = self.patrol_normalizer.normalize(r_patrol_raw)
+        r_efficiency_norm = self.efficiency_normalizer.normalize(r_efficiency_raw)
+
+        # Apply weights AFTER normalization (scale is now unified)
+        r_event = self.config.w_event * r_event_norm
+        r_patrol = self.config.w_patrol * r_patrol_norm
+        r_efficiency = self.config.w_efficiency * r_efficiency_norm
+        # Safety keeps original weight (not normalized)
+        r_safety_weighted = self.config.w_safety * r_safety
+
+        # Create reward components structure (store normalized values)
         rewards = RewardComponents(
             event=r_event,
             patrol=r_patrol,
-            safety=r_safety,
+            safety=r_safety_weighted,
             efficiency=r_efficiency,
         )
 
-        # Compute weighted total
-        rewards.compute_total(self.config)
+        # Compute total (components already weighted)
+        rewards.total = r_event + r_patrol + r_safety_weighted + r_efficiency
 
         return rewards
 
@@ -140,54 +159,80 @@ class RewardCalculator:
         event: Optional[Event],
         current_time: float,
         event_resolved: bool,
-        proximity_resolution: bool = False,  # Reviewer 박용준
+        proximity_resolution: bool = False,
     ) -> float:
         """
-        Calculate event response reward (R^evt).
+        Calculate event response reward (R^evt) - Phase 2 SLA-based.
 
-        Reward structure:
-        - Large bonus for successfully resolving event (full credit for direct dispatch)
-        - 50% bonus for low-risk event resolved via proximity (Reviewer 박용준)
-        - Continuous penalty for delay (encourages quick response)
-        - Large penalty if event exceeds max delay (failure)
+        Reviewer 박용준: Changed to realistic SLA-based rewards.
+
+        Reward structure (Phase 2):
+        - SLA_SUCCESS_VALUE for successful resolution (based on real-world cost savings)
+        - Risk/urgency multiplier: higher risk events worth more
+        - SLA_FAILURE_COST for missed events (based on real penalties)
+        - Continuous SLA-based delay penalty
+        - 50% credit for proximity resolution of low-risk events
+
+        Old problem: Arbitrary values (event_response_bonus = 70.0) with no real-world basis
+        New solution: Based on realistic SLA contracts and cost structures
 
         Args:
             event: Active event (None if no event)
             current_time: Current time
             event_resolved: Whether event was resolved this step
-            proximity_resolution: Whether resolved via proximity (partial credit) (Reviewer 박용준)
+            proximity_resolution: Whether resolved via proximity (partial credit)
 
         Returns:
-            Event reward component
+            Event reward component (will be normalized in calculate())
         """
         if event is None:
             # No event exists - neutral reward
             return 0.0
 
+        # Get risk level from extended event if available
+        risk_level = getattr(event, 'risk_level', 5)  # Default to mid-level risk
+        urgency = getattr(event, 'urgency', 0.5)
+
         if event_resolved:
-            # Successfully resolved event
-            # Bonus decreases slightly with delay to encourage speed
+            # Successfully resolved event - SLA success value
+            # Base value: $1000 per successful event (typical security SLA)
+            base_success = self.config.sla_event_success_value
+
+            # Risk multiplier: higher risk events are worth more
+            # Risk 1-3: 0.5x, Risk 4-6: 1.0x, Risk 7-9: 2.0x
+            risk_multiplier = 0.5 + (risk_level / 9.0) * 1.5
+
+            # Delay factor: encourage quick response (SLA quality score)
             delay = current_time - event.detection_time
-            delay_factor = max(0.0, 1.0 - delay / self.config.event_max_delay)
-            base_bonus = self.config.event_response_bonus * (0.5 + 0.5 * delay_factor)
+            sla_quality = max(0.0, 1.0 - delay / self.config.event_max_delay)
 
-            # Reviewer 박용준: Apply 50% multiplier for proximity resolution
+            # Total success reward
+            success_reward = base_success * risk_multiplier * (0.5 + 0.5 * sla_quality)
+
+            # Proximity resolution gets 50% credit (lower quality response)
             if proximity_resolution:
-                return base_bonus * 0.5  # Partial credit for low-risk event
+                return success_reward * 0.5
             else:
-                return base_bonus  # Full credit for direct dispatch
+                return success_reward
 
-        # Event exists but not resolved - apply delay penalty
+        # Event exists but not resolved
         delay = current_time - event.detection_time
 
         if delay > self.config.event_max_delay:
-            # Event failed due to excessive delay - large penalty
-            return -self.config.event_response_bonus
+            # SLA failure - large penalty (typical contract penalty: 2x success value)
+            base_failure = -self.config.sla_event_failure_cost
+            risk_multiplier = 0.5 + (risk_level / 9.0) * 1.5
+            return base_failure * risk_multiplier
 
-        # Continuous delay penalty (linear with time)
-        # Weighted by urgency (higher urgency = larger penalty)
-        penalty = -self.config.event_delay_penalty_rate * delay * event.urgency
-        return penalty
+        # Continuous delay penalty based on SLA degradation
+        # Linear degradation from 0 to failure cost
+        delay_ratio = delay / self.config.event_max_delay
+        sla_degradation_penalty = (
+            -self.config.sla_delay_penalty_rate *
+            delay_ratio *
+            (risk_level / 9.0)  # Higher risk = faster SLA degradation
+        )
+        return sla_degradation_penalty
 
     def _calculate_patrol_reward(
         self,
@@ -196,15 +241,17 @@ class RewardCalculator:
         patrol_point_visited: Optional[int],
     ) -> float:
         """
-        Calculate patrol coverage reward (R^pat).
+        Calculate patrol coverage reward (R^pat) - Phase 2 Delta Coverage.
 
-        Reward structure:
-        - Small bonus for visiting a patrol point
-        - Continuous penalty for coverage gaps (sum of all overdue times)
-        - Penalty weighted by patrol point priority
+        Reviewer 박용준: Changed from absolute gap penalty to delta coverage reward.
 
-        This component is CRITICAL for unified learning. Without it, the policy
-        could learn to dispatch frequently without understanding the cost to coverage.
+        Reward structure (Phase 2):
+        - POSITIVE reward for closing coverage gap when visiting a point
+        - Small baseline penalty for total accumulated gaps (normalized by num_points)
+        - No longer punishes every step heavily - focuses on improvement
+
+        Old problem: Campus map had -332/step penalty, completely dominated event reward
+        New solution: Reward improvement, not absolute coverage state
 
         Args:
             patrol_points: All patrol points
@@ -212,29 +259,30 @@ class RewardCalculator:
             patrol_point_visited: Index of point visited (None if none)
 
         Returns:
-            Patrol reward component
+            Patrol reward component (will be normalized in calculate())
         """
         reward = 0.0
+        num_points = len(patrol_points)
 
-        # Bonus for visiting a patrol point
+        # POSITIVE reward for closing coverage gap (Delta Coverage)
         if patrol_point_visited is not None:
-            reward += self.config.patrol_visit_bonus
+            point = patrol_points[patrol_point_visited]
+            gap_closed = current_time - point.last_visit_time
 
-        # Penalty for coverage gaps (cumulative overdue time)
-        total_gap_penalty = 0.0
-        for point in patrol_points:
-            time_since_visit = current_time - point.last_visit_time
+            # Larger gap closed = larger reward (incentivizes visiting overdue points)
+            # Priority weight: more important points give more reward
+            visit_reward = gap_closed * point.priority * self.config.patrol_visit_reward_rate
+            reward += visit_reward
 
-            # Apply penalty if point is overdue
-            # Priority weight: higher priority points incur larger penalties
-            gap_penalty = (
-                self.config.patrol_gap_penalty_rate *
-                time_since_visit *
-                point.priority
-            )
-            total_gap_penalty += gap_penalty
-
-        reward -= total_gap_penalty
+        # Small baseline penalty for accumulated gaps (prevents policy from ignoring patrol)
+        # Normalized by num_points to make it map-independent
+        total_gap = sum(
+            (current_time - p.last_visit_time) * p.priority
+            for p in patrol_points
+        )
+        normalized_gap = total_gap / max(num_points, 1)
+        baseline_penalty = -self.config.patrol_baseline_penalty_rate * normalized_gap
+        reward += baseline_penalty
 
         return reward
 
@@ -453,3 +501,94 @@ class RewardNormalizer:
             (mean, variance, count)
         """
         return self.mean, self.var, self.count
+
+
+class ComponentNormalizer:
+    """
+    Per-component reward normalizer for Phase 2.
+
+    Reviewer 박용준: Normalizes each reward component separately to ensure
+    they have similar magnitudes, preventing one component from dominating.
+
+    Uses Welford's online algorithm for numerical stability.
+
+    Attributes:
+        name: Component name (for logging)
+        mean: Running mean
+        M2: Running sum of squared differences (for variance)
+        count: Number of samples
+        epsilon: Small constant for numerical stability
+    """
+
+    def __init__(self, name: str, epsilon: float = 1e-8):
+        """
+        Initialize component normalizer.
+
+        Args:
+            name: Component name (e.g., "event", "patrol")
+            epsilon: Small constant for numerical stability
+        """
+        self.name = name
+        self.mean = 0.0
+        self.M2 = 0.0
+        self.count = 0
+        self.epsilon = epsilon
+
+    def normalize(self, value: float, update_stats: bool = True) -> float:
+        """
+        Normalize value using running statistics.
+
+        Args:
+            value: Raw component value
+            update_stats: Whether to update running statistics
+
+        Returns:
+            Normalized value (approximately mean=0, std=1)
+        """
+        if update_stats:
+            self._update(value)
+
+        # Need at least 2 samples to compute std
+        if self.count < 2:
+            return value
+
+        # Compute std from M2
+        variance = self.M2 / (self.count - 1)
+        std = max(np.sqrt(variance), self.epsilon)
+
+        # Normalize: (x - mean) / std
+        normalized = (value - self.mean) / std
+        return normalized
+
+    def _update(self, value: float) -> None:
+        """
+        Update running statistics using Welford's online algorithm.
+
+        Args:
+            value: New value to incorporate
+        """
+        self.count += 1
+        delta = value - self.mean
+        self.mean += delta / self.count
+        delta2 = value - self.mean
+        self.M2 += delta * delta2
+
+    def get_stats(self) -> Tuple[float, float, float, int]:
+        """
+        Get current statistics.
+
+        Returns:
+            (mean, std, variance, count)
+        """
+        if self.count < 2:
+            return self.mean, 0.0, 0.0, self.count
+
+        variance = self.M2 / (self.count - 1)
+        std = np.sqrt(variance)
+        return self.mean, std, variance, self.count
+
+    def reset(self) -> None:
+        """Reset statistics to initial state."""
+        self.mean = 0.0
+        self.M2 = 0.0
+        self.count = 0

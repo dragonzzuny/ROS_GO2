@@ -144,10 +144,11 @@ class PatrolEnv(gym.Env):
             self.env_config.num_candidates,  # Replan strategy index
         ])
 
+        # Reviewer 박용준: Phase 4 - Observation space 77D → 88D
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(77,),
+            shape=(88,),
             dtype=np.float32,
         )
 
@@ -176,7 +177,7 @@ class PatrolEnv(gym.Env):
             options: Optional reset parameters (unused)
 
         Returns:
-            observation: Initial 77D observation
+            observation: Initial 88D observation (Phase 4 enhanced)
             info: Dictionary with episode info
         """
         # Seed RNG
@@ -192,6 +193,9 @@ class PatrolEnv(gym.Env):
             collision_rate=0.01,
             np_random=np.random.RandomState(seed),
         )
+
+        # Reviewer 박용준: Connect nav_interface to candidate factory for A* pathfinding
+        self.candidate_factory.set_nav_interface(self.nav_interface)
 
         # Initialize robot at random patrol point
         initial_point_idx = self.np_random.integers(0, self.env_config.num_patrol_points)
@@ -306,9 +310,10 @@ class PatrolEnv(gym.Env):
         replan_idx = max(0, min(replan_idx, self.env_config.num_candidates - 1))
         action_obj = Action(mode=mode, replan_idx=replan_idx)
 
-        # Apply action masking (log warning if invalid)
+        # Apply action masking (silently adjust invalid actions)
         if not self._is_action_valid(action_obj):
-            print(f"Warning: Invalid action {action_obj} - adjusting to PATROL mode")
+            # Silently adjust to PATROL mode instead of printing warning
+            # print(f"Warning: Invalid action {action_obj} - adjusting to PATROL mode")
             # Reviewer 박용준: Also ensure replan_idx is valid
             replan_idx = max(0, min(replan_idx, self.env_config.num_candidates - 1))
             action_obj = Action(mode=ActionMode.PATROL, replan_idx=replan_idx)

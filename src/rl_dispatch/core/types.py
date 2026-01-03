@@ -367,10 +367,10 @@ class Observation:
     """
     Normalized observation vector for the RL policy.
 
-    This is the processed 77-dimensional observation fed to the neural network.
+    Reviewer 박용준: Phase 4 - Enhanced to 88-dimensional observation.
     All values are normalized to approximately [-1, 1] or [0, 1] ranges.
 
-    Observation Components (77D total):
+    Observation Components (88D total - Phase 4 Enhanced):
         - goal_relative_vec (2D): Normalized (dx, dy) to current goal
         - heading_sin_cos (2D): (sin(theta), cos(theta)) of robot heading
         - velocity_angular (2D): Normalized (v, omega)
@@ -378,27 +378,31 @@ class Observation:
         - lidar_ranges (64D): Normalized LiDAR ranges
         - event_features (4D): [exists, urgency, confidence, elapsed_time_norm]
         - patrol_features (2D): [distance_to_next_norm, coverage_gap_ratio]
+        - event_risk_level (1D): Event risk [0, 1] (Phase 4)
+        - patrol_crisis (3D): [max_gap, critical_count, crisis_score] (Phase 4)
+        - candidate_feasibility (6D): Feasibility per candidate (Phase 4)
+        - urgency_risk_combined (1D): Combined priority signal (Phase 4)
 
     Note:
         Normalization is critical for RL training stability. Running statistics
         (mean/std) are maintained during training and applied at inference.
 
     Example:
-        >>> obs = Observation(vector=np.zeros(77, dtype=np.float32))
-        >>> assert obs.vector.shape == (77,)
-        >>> assert obs.dim == 77
+        >>> obs = Observation(vector=np.zeros(88, dtype=np.float32))
+        >>> assert obs.vector.shape == (88,)
+        >>> assert obs.dim == 88
     """
-    vector: npt.NDArray[np.float32]  # Shape: (77,)
+    vector: npt.NDArray[np.float32]  # Shape: (88,) - Reviewer 박용준: Phase 4
 
     def __post_init__(self) -> None:
         """Validate observation dimensions."""
-        if self.vector.shape != (77,):
-            raise ValueError(f"Observation must be 77D, got {self.vector.shape}")
+        if self.vector.shape != (88,):  # Reviewer 박용준: Phase 4 - 77 → 88
+            raise ValueError(f"Observation must be 88D, got {self.vector.shape}")
 
     @property
     def dim(self) -> int:
         """Returns the observation dimensionality."""
-        return 77
+        return 88  # Reviewer 박용준: Phase 4 - 77 → 88
 
     def to_dict(self) -> dict:
         """
@@ -406,7 +410,8 @@ class Observation:
 
         Returns:
             Dictionary with keys: goal_rel, heading, velocity, battery,
-            lidar, event, patrol
+            lidar, event, patrol, event_risk, patrol_crisis,
+            candidate_feasibility, urgency_risk_combined (Phase 4)
         """
         return {
             "goal_relative": self.vector[0:2],
@@ -416,6 +421,11 @@ class Observation:
             "lidar": self.vector[7:71],
             "event_features": self.vector[71:75],
             "patrol_features": self.vector[75:77],
+            # Reviewer 박용준: Phase 4 enhancements
+            "event_risk_level": self.vector[77:78],
+            "patrol_crisis": self.vector[78:81],
+            "candidate_feasibility": self.vector[81:87],
+            "urgency_risk_combined": self.vector[87:88],
         }
 
 

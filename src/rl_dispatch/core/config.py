@@ -63,13 +63,24 @@ class RewardConfig:
     event_delay_penalty_rate: float = 0.5  # per second
     event_max_delay: float = 120.0  # seconds
 
-    # Patrol coverage parameters
-    patrol_gap_penalty_rate: float = 0.1  # per second of gap
-    patrol_visit_bonus: float = 2.0
+    # Patrol coverage parameters (Phase 2: Delta Coverage)
+    patrol_gap_penalty_rate: float = 0.1  # DEPRECATED - kept for backward compatibility
+    patrol_visit_bonus: float = 2.0  # DEPRECATED - kept for backward compatibility
 
-    # Safety parameters
-    collision_penalty: float = -100.0
-    nav_failure_penalty: float = -20.0
+    # Reviewer 박용준: Phase 2 - Delta Coverage parameters
+    patrol_visit_reward_rate: float = 0.5  # Reward multiplier for gap closed (positive reward)
+    patrol_baseline_penalty_rate: float = 0.01  # Small baseline penalty for accumulated gaps (normalized)
+
+    # Reviewer 박용준: Phase 2 - SLA-based Event parameters
+    # Values scaled down 10x for better normalization (represents $100 per event in scaled units)
+    sla_event_success_value: float = 100.0  # Base success value (scaled SLA)
+    sla_event_failure_cost: float = 200.0  # Failure penalty (2x success, scaled)
+    sla_delay_penalty_rate: float = 10.0  # SLA degradation rate (scaled)
+
+    # Safety parameters (Reviewer 박용준: Reduced for Phase 2 - works with normalized components)
+    # Old values (-100, -20) were too dominant compared to normalized components
+    collision_penalty: float = -10.0  # Severe but not overwhelming
+    nav_failure_penalty: float = -2.0  # Mild penalty for recoverable failure
 
     # Efficiency parameters
     distance_penalty_rate: float = 0.01  # per meter
