@@ -31,13 +31,13 @@ import time
 from typing import Tuple, Optional, List
 import numpy as np
 
-from .robot_interface import (
+from ..common.robot_interface import (
     RobotInterface,
     RobotState,
     NavigationGoal,
     NavigationFeedback,
 )
-from .config import RealRobotConfig
+from ..common.config import RealRobotConfig
 
 
 logger = logging.getLogger(__name__)

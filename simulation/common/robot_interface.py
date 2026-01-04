@@ -444,7 +444,10 @@ def create_robot_interface(
     elif mode == "gazebo":
         # Import Gazebo interface (requires ROS2)
         try:
-            from .gazebo_interface import GazeboRobotInterface
+            from ..gazebo.gazebo_interface import Go2RobotInterface as GazeboRobotInterface
+            if config is None:
+                from .config import GazeboConfig
+                config = GazeboConfig()
             return GazeboRobotInterface(config, **kwargs)
         except ImportError:
             raise ImportError(
@@ -455,7 +458,7 @@ def create_robot_interface(
     elif mode == "real":
         # Import Go2 interface (requires ROS2)
         try:
-            from .go2_interface import Go2RobotInterface
+            from ..gazebo.gazebo_interface import Go2RobotInterface
             if config is None:
                 config = RealRobotConfig()
             return Go2RobotInterface(config, **kwargs)

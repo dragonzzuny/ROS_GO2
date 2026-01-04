@@ -1,0 +1,35 @@
+# Simulation Dependencies for RL Dispatch
+
+# Core
+numpy>=1.24.0
+torch>=2.0.0
+pyyaml>=6.0
+
+# ROS2 (install via apt: ros-humble-*)
+# rclpy
+# geometry_msgs
+# nav_msgs
+# sensor_msgs
+# nav2_msgs
+# gazebo_msgs
+# std_srvs
+# tf2_ros
+
+# Go2 ROS2 SDK (for real robot WebRTC connection)
+aiortc>=1.9.0
+aiohttp>=3.8.0
+paho-mqtt>=1.6.0
+pycryptodome>=3.18.0
+opencv-python>=4.8.0
+
+# Isaac Sim (install separately from NVIDIA)
+# isaacsim
+# isaaclab
+
+# Visualization
+open3d>=0.17.0
+matplotlib>=3.7.0
+
+# Optional: For camera processing
+# pydub
+# cv_bridge (ROS2 package)
